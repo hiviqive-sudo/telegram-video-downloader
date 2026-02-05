@@ -21,15 +21,15 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Переменные окружения (настраиваются в Railway.app → Variables)
-API_TOKEN = os.getenv("API_TOKEN")                       # Токен бота от @BotFather
-MAX_FILE_SIZE_MB = int(os.getenv("MAX_FILE_SIZE_MB", "120"))          # Максимальный размер файла в МБ
-REQUEST_LIMIT_PER_MINUTE = int(os.getenv("REQUEST_LIMIT_PER_MINUTE", "5"))  # Анти-спам: запросов в минуту
+# Переменные окружения (настраиваются в Railway → Variables)
+API_TOKEN = os.getenv("API_TOKEN")
+MAX_FILE_SIZE_MB = int(os.getenv("MAX_FILE_SIZE_MB", "120"))
+REQUEST_LIMIT_PER_MINUTE = int(os.getenv("REQUEST_LIMIT_PER_MINUTE", "5"))
 
-# Ссылка на вашего бота — ОБЯЗАТЕЛЬНО ИЗМЕНИТЕ!
-BOT_LINK = "https://t.me/myyvideodownloader_bot"          # ←←← Замените здесь !!!
+# ОБЯЗАТЕЛЬНО ИЗМЕНИТЕ на username вашего бота
+BOT_LINK = "https://t.me/myyvideodownloader_bot"   # ←←← замените здесь !!!
 
-# Список доступных качеств и соответствующие форматы
+# Доступные качества
 QUALITIES = {
     "360":  "bestvideo[height<=360][ext=mp4]/best[height<=360]/bestvideo[ext=mp4]+bestaudio/best",
     "480":  "bestvideo[height<=480][ext=mp4]/best[height<=480]/bestvideo[ext=mp4]+bestaudio/best",
@@ -41,7 +41,7 @@ QUALITIES = {
 bot = Bot(token=API_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
 
-# Анти-спам: {user_id: [список timestamp последних запросов]}
+# Анти-спам
 user_requests = {}
 
 
@@ -49,9 +49,9 @@ user_requests = {}
 async def cmd_start(message: types.Message):
     await message.answer(
         "<b>Привет! 👋</b>\n\n"
-        "Я скачиваю видео из TikTok, Instagram Reels, YouTube, Twitter/X и многих других сайтов.\n"
+        "Я скачиваю видео из TikTok, Instagram Reels, YouTube, Twitter/X и других сайтов.\n"
         "Без водяных знаков (где возможно).\n\n"
-        "<b>Просто пришли ссылку</b> — и всё будет готово!"
+        "<b>Пришли мне ссылку</b> — и всё будет готово!"
     )
 
 
@@ -63,7 +63,7 @@ async def cmd_help(message: types.Message):
         "2. Выбери качество\n"
         "3. Подожди — бот пришлёт файл\n\n"
         f"Лимиты:\n"
-        f"• До 50 МБ — отправляется как видео\n"
+        f"• До 50 МБ — как видео\n"
         f"• 50–{MAX_FILE_SIZE_MB} МБ — как документ\n"
         f"• Больше {MAX_FILE_SIZE_MB} МБ — не скачаю\n\n"
         "Если видео не скачивается — попробуй другую ссылку или качество."
@@ -80,7 +80,7 @@ async def handle_link(message: types.Message):
     user_id = message.from_user.id
     now = time.time()
 
-    # Проверка анти-спама
+    # Анти-спам
     if user_id not in user_requests:
         user_requests[user_id] = []
     user_requests[user_id] = [t for t in user_requests[user_id] if now - t < 60]
@@ -111,7 +111,6 @@ async def handle_link(message: types.Message):
             duration_str = f"{duration // 60:02d}:{duration % 60:02d}" if duration else "—"
             thumbnail = info.get("thumbnail")
 
-            # Клавиатура с кнопками качества
             keyboard = InlineKeyboardMarkup(inline_keyboard=[])
             row = []
             for q_name in QUALITIES:
@@ -229,7 +228,7 @@ async def process_download(callback: types.CallbackQuery):
 
 async def main():
     logger.info("Бот запущен")
-    await dp.start_polling(bot, allowed_updates=types.default_allowed_updates)
+    await dp.start_polling(bot)
 
 
 if __name__ == "__main__":
