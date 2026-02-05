@@ -35,9 +35,7 @@ user_requests = {}
 async def cmd_start(message: types.Message):
     await message.answer(
         "<b>Привет! 👋</b>\n\n"
-        "Скачиваю видео и аудио из:\n"
-        "• TikTok\n"
-        "• Instagram Reels\n\n"
+        "Скачиваю видео и аудио из TikTok и Instagram Reels.\n\n"
         "<b>Пришли ссылку</b> — выбери, что скачать!"
     )
 
@@ -91,7 +89,7 @@ async def handle_link(message: types.Message):
             info = ydl.extract_info(url, download=False)
 
             extractor = info.get("extractor_key", "").lower()
-            if "tiktok" not in extractor and "instagram" not in extractor:
+            if "tiktok" not in extractor and "instagram" in extractor:
                 await message.answer("Поддерживаю только TikTok и Instagram Reels. Попробуй другую ссылку.")
                 return
 
@@ -153,9 +151,9 @@ async def process_callback(callback: types.CallbackQuery):
 
     try:
         if choice == "video":
-            format_str = "bestvideo+bestaudio/best"  # видео с аудио
+            format_str = "bestvideo+bestaudio/best"
         else:
-            format_str = "bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio/best"  # только аудио
+            format_str = "bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio/best"
 
         ydl_opts = {
             "format": format_str,
