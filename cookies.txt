@@ -6,10 +6,10 @@
 .instagram.com	TRUE	/	TRUE	1804868065	datr	4sGEaVy3aADxVsr1jsribNwe
 .instagram.com	TRUE	/	TRUE	1804868066	ps_l	1
 .instagram.com	TRUE	/	TRUE	1804868066	ps_n	1
-.instagram.com	TRUE	/	TRUE	1770913014	dpr	1.25
-.instagram.com	TRUE	/	TRUE	1770913014	wd	1536x783
+.instagram.com	TRUE	/	TRUE	1770914594	dpr	1.25
+.instagram.com	TRUE	/	TRUE	1770914594	wd	1536x783
 .instagram.com	TRUE	/	TRUE	1804868070	mid	aYTB4gALAAHtcRi0cQNkfNOTpulc
-.instagram.com	TRUE	/	TRUE	1804868331	csrftoken	XFkByK0n9FFawGStRPiOEDXzVrhprl3u
-.instagram.com	TRUE	/	TRUE	1778084331	ds_user_id	80120422937
+.instagram.com	TRUE	/	TRUE	1804869800	csrftoken	XFkByK0n9FFawGStRPiOEDXzVrhprl3u
+.instagram.com	TRUE	/	TRUE	1778085800	ds_user_id	80120422937
 .instagram.com	TRUE	/	TRUE	1801844208	sessionid	80120422937%3AZwqghcSXFHh6mH%3A11%3AAYhgcRKUU_ckUTJw62gVkusSsJ6WsOeJ2B0nC8HD_g
-.instagram.com	TRUE	/	TRUE	0	rur	"CLN\05480120422937\0541801844332:01fe0306cb8ac5b0711dabc871d0c4312938c81bc40e6d17577248e9cfba86f4d6256c13"
+.instagram.com	TRUE	/	TRUE	0	rur	"CLN\05480120422937\0541801845801:01feab81e8932b883bec655a4227e0975f7767e913c72d3eed3fa9a3470f540a280f4448"
