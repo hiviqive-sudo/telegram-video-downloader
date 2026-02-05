@@ -24,7 +24,7 @@ API_TOKEN = os.getenv("API_TOKEN")
 MAX_FILE_SIZE_MB = int(os.getenv("MAX_FILE_SIZE_MB", "120"))
 REQUEST_LIMIT_PER_MINUTE = int(os.getenv("REQUEST_LIMIT_PER_MINUTE", "5"))
 
-BOT_LINK = "https://t.me/myyvideodownloader_bot"  # ← замени на свой, если нужно
+BOT_LINK = "https://t.me/myyvideodownloader_bot"  # ← здесь укажи username своего бота
 
 bot = Bot(token=API_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
@@ -35,30 +35,37 @@ user_requests = {}
 async def cmd_start(message: types.Message):
     await message.answer(
         "<b>Привет! 👋</b>\n\n"
-        "Я скачиваю видео или аудио из TikTok, Instagram Reels, YouTube и др.\n\n"
-        "<b>Пришли ссылку</b> на видео — и выбери, что скачать!"
+        "Скачиваю видео и аудио из:\n"
+        "• YouTube (видео + Shorts)\n"
+        "• TikTok\n"
+        "• Instagram Reels\n"
+        "• VK клипы и видео\n"
+        "• Twitter/X и многие другие\n\n"
+        "<b>Пришли ссылку</b> — выбери видео или аудио!"
     )
 
 @dp.message(Command("help"))
 async def cmd_help(message: types.Message):
     await message.answer(
         "<b>Как пользоваться</b>\n\n"
-        "1. Пришли ссылку на видео\n"
+        "1. Пришли ссылку на видео/клип\n"
         "2. Выбери «Видео» или «Аудио»\n"
         "3. Жди — бот пришлёт файл\n\n"
-        f"Лимит: до {MAX_FILE_SIZE_MB} МБ\n\n"
-        "Поддерживаю Instagram, TikTok, YouTube и другие."
+        "Поддерживаю:\n"
+        "YouTube, YouTube Shorts, TikTok, Instagram Reels, VK клипы/видео, Twitter/X и др.\n\n"
+        f"Лимит размера: {MAX_FILE_SIZE_MB} МБ\n"
+        "Если не скачивается — попробуй другую ссылку."
     )
 
 @dp.message()
 async def handle_link(message: types.Message):
     url = message.text.strip()
     if not url.startswith(("http://", "https://")):
-        await message.answer("Пришли ссылку на видео.")
+        await message.answer("Пришли ссылку на видео/клип.")
         return
 
     if "t.me/" in url.lower():
-        await message.answer("Это ссылка на Telegram. Пришли ссылку на видео!")
+        await message.answer("Это ссылка на Telegram. Пришли ссылку на видео/клип с сайта!")
         return
 
     user_id = message.from_user.id
@@ -94,14 +101,12 @@ async def handle_link(message: types.Message):
             duration_str = f"{int(duration) // 60:02d}:{int(duration) % 60:02d}" if duration and duration > 0 else "—"
             thumbnail = info.get("thumbnail")
 
-            # Сохраняем полную ссылку
             bot.full_url = url
 
-            # Кнопки выбора: Видео или Аудио
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
                 [
-                    InlineKeyboardButton(text="Видео", callback_data=f"dl_video_{url.split('?')[0]}"),
-                    InlineKeyboardButton(text="Аудио", callback_data=f"dl_audio_{url.split('?')[0]}")
+                    InlineKeyboardButton(text="Видео", callback_data="dl_video"),
+                    InlineKeyboardButton(text="Аудио", callback_data="dl_audio")
                 ]
             ])
 
@@ -110,7 +115,7 @@ async def handle_link(message: types.Message):
                 f"Автор: {uploader}\n"
                 f"Длительность: {duration_str}\n"
                 f"Источник: {info.get('extractor_key', 'сайт')}\n\n"
-                f"Выбери, что скачать:\n\n"
+                f"Что скачать:\n\n"
                 f"🤖 <a href=\"{BOT_LINK}\">Ещё</a>"
             )
 
@@ -125,24 +130,19 @@ async def handle_link(message: types.Message):
 
     except Exception as e:
         logger.error(f"Ошибка обработки {url}: {str(e)}", exc_info=True)
-        await message.answer("Не получилось обработать эту ссылку 😔\nПопробуй другую.")
+        await message.answer("Не получилось обработать эту ссылку 😔\nПопробуй другую или /help")
 
-@dp.callback_query(lambda c: c.data.startswith("dl_"))
+@dp.callback_query(lambda c: c.data in ["dl_video", "dl_audio"])
 async def process_download(callback: types.CallbackQuery):
-    try:
-        _, choice, short_url = callback.data.split("_", 2)
-    except:
-        await callback.answer("Ошибка", show_alert=True)
-        return
-
-    url = bot.full_url  # полная ссылка
+    choice = callback.data.split("_")[1]
+    url = bot.full_url
 
     await callback.message.edit_caption(caption=f"Скачиваю {choice}... ⏳", reply_markup=None)
 
     try:
         if choice == "video":
-            format_str = "best[ext=mp4]/best"
-        else:  # audio
+            format_str = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
+        else:
             format_str = "bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio/best"
 
         ydl_opts = {
