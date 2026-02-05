@@ -10,6 +10,7 @@ from aiogram.types import FSInputFile, InlineKeyboardMarkup, InlineKeyboardButto
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
+# Логирование
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -20,18 +21,21 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Переменные из Railway
 API_TOKEN = os.getenv("API_TOKEN")
 MAX_FILE_SIZE_MB = int(os.getenv("MAX_FILE_SIZE_MB", "120"))
 REQUEST_LIMIT_PER_MINUTE = int(os.getenv("REQUEST_LIMIT_PER_MINUTE", "5"))
 
-BOT_LINK = "https://t.me/myyvideodownloader_bot"  # ← твой бот
+# ОБЯЗАТЕЛЬНО ИЗМЕНИТЬ!
+BOT_LINK = "https://t.me/myyvideodownloader_bot"  # ← ваш реальный username бота
 
+# Качества видео (без требования слияния, чтобы работало без ffmpeg; если ffmpeg установлен — можно добавить +bestaudio)
 QUALITIES = {
-    "360":  "bestvideo[height<=360][ext=mp4]/best[height<=360]/bestvideo[ext=mp4]+bestaudio/best",
-    "480":  "bestvideo[height<=480][ext=mp4]/best[height<=480]/bestvideo[ext=mp4]+bestaudio/best",
-    "720":  "bestvideo[height<=720][ext=mp4]/best[height<=720]/bestvideo[ext=mp4]+bestaudio/best",
-    "1080": "bestvideo[height<=1080][ext=mp4]/best[height<=1080]/bestvideo[ext=mp4]+bestaudio/best",
-    "Audio": "bestaudio[ext=m4a]/bestaudio/best",
+    "360":  "best[ext=mp4][height<=360]/best[height<=360]/best",
+    "480":  "best[ext=mp4][height<=480]/best[height<=480]/best",
+    "720":  "best[ext=mp4][height<=720]/best[height<=720]/best",
+    "1080": "best[ext=mp4][height<=1080]/best[height<=1080]/best",
+    "Audio": "bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio/best",  # только аудио
 }
 
 bot = Bot(token=API_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
@@ -43,7 +47,8 @@ user_requests = {}
 async def cmd_start(message: types.Message):
     await message.answer(
         "<b>Привет! 👋</b>\n\n"
-        "Скачиваю видео из TikTok, Instagram Reels, YouTube и др.\n\n"
+        "Скачиваю видео из TikTok, Instagram Reels, YouTube, Twitter/X и других сайтов.\n"
+        "Без водяных знаков (где возможно).\n\n"
         "<b>Пришли ссылку</b> на видео!"
     )
 
@@ -52,16 +57,19 @@ async def cmd_help(message: types.Message):
     await message.answer(
         "<b>Как пользоваться</b>\n\n"
         "1. Пришли ссылку на видео\n"
-        "2. Выбери качество\n"
+        "2. Выбери качество (360, 480, 720, 1080, Audio)\n"
         "3. Жди — бот пришлёт файл\n\n"
-        "Работает с Instagram, TikTok, YouTube и многими другими!"
+        f"Лимиты:\n"
+        f"• До 50 МБ — видео\n"
+        f"• 50–{MAX_FILE_SIZE_MB} МБ — документ\n\n"
+        "Для Instagram используй свежие cookies.txt."
     )
 
 @dp.message()
 async def handle_link(message: types.Message):
     url = message.text.strip()
     if not url.startswith(("http://", "https://")):
-        await message.answer("Пришли ссылку на видео.")
+        await message.answer("Это не ссылка. Пришли правильную ссылку на видео.")
         return
 
     if "t.me/" in url.lower():
@@ -74,7 +82,7 @@ async def handle_link(message: types.Message):
         user_requests[user_id] = []
     user_requests[user_id] = [t for t in user_requests[user_id] if now - t < 60]
     if len(user_requests[user_id]) >= REQUEST_LIMIT_PER_MINUTE:
-        await message.answer("Подожди минуту ⏳")
+        await message.answer("Слишком много запросов. Подожди минуту ⏳")
         return
     user_requests[user_id].append(now)
 
@@ -101,15 +109,19 @@ async def handle_link(message: types.Message):
             duration_str = f"{int(duration) // 60:02d}:{int(duration) % 60:02d}" if duration and duration > 0 else "—"
             thumbnail = info.get("thumbnail")
 
-            # Укорачиваем URL для кнопок (решение BUTTON_DATA_INVALID)
-            short_url = url.split("?")[0]  # убираем всё после ?
+            # Короткая версия для callback_data
+            short_url = url.split("?")[0] if "?" in url else url
 
             keyboard = InlineKeyboardMarkup(inline_keyboard=[])
             row = []
             for q_name in QUALITIES:
+                callback_data = f"dl_{q_name}_{short_url}"
+                if len(callback_data) > 64:  # Telegram лимит
+                    callback_data = f"dl_{q_name}_{short_url[:50]}"  # укорачиваем ещё
+
                 btn = InlineKeyboardButton(
                     text=q_name,
-                    callback_data=f"dl_{q_name}_{short_url}"
+                    callback_data=callback_data
                 )
                 row.append(btn)
                 if len(row) == 3:
@@ -127,6 +139,9 @@ async def handle_link(message: types.Message):
                 f"🤖 <a href=\"{BOT_LINK}\">Ещё видео</a>"
             )
 
+            # Сохраняем полную ссылку
+            bot.full_url = url
+
             if thumbnail:
                 await message.answer_photo(
                     photo=thumbnail,
@@ -135,9 +150,6 @@ async def handle_link(message: types.Message):
                 )
             else:
                 await message.answer(caption, reply_markup=keyboard)
-
-            # Сохраняем полную ссылку для скачивания
-            message.bot.full_url = url
 
     except Exception as e:
         logger.error(f"Ошибка обработки {url}: {str(e)}", exc_info=True)
@@ -155,7 +167,7 @@ async def process_download(callback: types.CallbackQuery):
         await callback.answer("Нет такого качества", show_alert=True)
         return
 
-    url = callback.message.bot.full_url  # берём полную ссылку
+    url = bot.full_url  # полная ссылка
 
     await callback.message.edit_caption(caption=f"Скачиваю в {quality}... ⏳", reply_markup=None)
 
@@ -186,14 +198,23 @@ async def process_download(callback: types.CallbackQuery):
                 return
 
             title = info.get("title", "Видео")
+            uploader = info.get("uploader", "Автор неизвестен")
             caption = (
                 f"<b>{title}</b>\n"
                 f"Качество: {quality}\n"
-                f"Размер: {file_size_mb:.1f} МБ\n\n"
+                f"Размер: {file_size_mb:.1f} МБ\n"
+                f"Тип: {'Аудио' if quality == 'Audio' else 'Видео'}\n\n"
                 f"🤖 <a href=\"{BOT_LINK}\">Ещё видео</a>"
             )
 
-            if file_size_mb <= 50:
+            if quality == "Audio":
+                await callback.message.answer_audio(
+                    audio=FSInputFile(filename),
+                    caption=caption,
+                    title=title,
+                    performer=uploader
+                )
+            elif file_size_mb <= 50:
                 await callback.message.answer_video(
                     video=FSInputFile(filename),
                     caption=caption,
