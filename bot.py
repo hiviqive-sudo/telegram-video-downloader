@@ -40,7 +40,7 @@ async def cmd_start(message: types.Message):
         "• TikTok\n"
         "• Instagram Reels\n"
         "• VK клипы и видео\n"
-        "• Twitter/X и многие другие\n\n"
+        "• Twitter/X и др.\n\n"
         "<b>Пришли ссылку</b> — выбери видео или аудио!"
     )
 
@@ -52,7 +52,7 @@ async def cmd_help(message: types.Message):
         "2. Выбери «Видео» или «Аудио»\n"
         "3. Жди — бот пришлёт файл\n\n"
         "Поддерживаю YouTube, Shorts, TikTok, Instagram, VK, Twitter/X и др.\n\n"
-        f"Лимит размера: {MAX_FILE_SIZE_MB} МБ\n"
+        f"Лимит: {MAX_FILE_SIZE_MB} МБ\n"
         "Если ошибка — попробуй другую ссылку."
     )
 
@@ -140,7 +140,7 @@ async def process_download(callback: types.CallbackQuery):
 
     try:
         if choice == "video":
-            # Самый гибкий формат — берёт лучшее доступное видео + аудио
+            # Самый гибкий формат — берёт любое доступное видео + аудио
             format_str = "bestvideo+bestaudio/best"
         else:
             format_str = "bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio/best"
@@ -156,6 +156,7 @@ async def process_download(callback: types.CallbackQuery):
             "nocheckcertificate": True,
             "cookiefile": "cookies.txt",
             "merge_output_format": "mp4" if choice == "video" else None,
+            "postprocessors": [{"key": "FFmpegVideoConvertor", "preferedformat": "mp4"}] if choice == "video" else [],
         }
 
         with tempfile.TemporaryDirectory() as tmpdir:
