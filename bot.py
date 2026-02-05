@@ -165,7 +165,6 @@ async def process_callback(callback: types.CallbackQuery):
 
         if choice == "video":
             if "youtube" in extractor:
-                # YouTube — только аудио
                 format_str = "bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio/best"
                 real_choice = "audio"
             else:
@@ -248,3 +247,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+    
