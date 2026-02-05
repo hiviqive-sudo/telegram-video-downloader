@@ -10,7 +10,7 @@ from aiogram.types import FSInputFile, InlineKeyboardMarkup, InlineKeyboardButto
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
-# Логирование (в файл + консоль для Railway)
+# Логирование
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -21,15 +21,14 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Переменные окружения (настраиваются в Railway → Variables)
+# Переменные из Railway
 API_TOKEN = os.getenv("API_TOKEN")
 MAX_FILE_SIZE_MB = int(os.getenv("MAX_FILE_SIZE_MB", "120"))
 REQUEST_LIMIT_PER_MINUTE = int(os.getenv("REQUEST_LIMIT_PER_MINUTE", "5"))
 
-# ОБЯЗАТЕЛЬНО ИЗМЕНИТЕ на username вашего бота
-BOT_LINK = "https://t.me/myyvideodownloader_bot"   # ←←← замените здесь !!!
+# ←←← ИЗМЕНИТЕ ОБЯЗАТЕЛЬНО НА СВОЕГО БОТА!
+BOT_LINK = "https://t.me/myyvideodownloader_bot"   # например https://t.me/MyVideoDownloaderBot
 
-# Доступные качества
 QUALITIES = {
     "360":  "bestvideo[height<=360][ext=mp4]/best[height<=360]/bestvideo[ext=mp4]+bestaudio/best",
     "480":  "bestvideo[height<=480][ext=mp4]/best[height<=480]/bestvideo[ext=mp4]+bestaudio/best",
@@ -41,34 +40,30 @@ QUALITIES = {
 bot = Bot(token=API_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
 
-# Анти-спам
 user_requests = {}
-
 
 @dp.message(CommandStart())
 async def cmd_start(message: types.Message):
     await message.answer(
         "<b>Привет! 👋</b>\n\n"
-        "Я скачиваю видео из TikTok, Instagram Reels, YouTube, Twitter/X и других сайтов.\n"
+        "Я скачиваю видео из TikTok, Instagram Reels, YouTube, Twitter/X и др.\n"
         "Без водяных знаков (где возможно).\n\n"
-        "<b>Пришли мне ссылку</b> — и всё будет готово!"
+        "<b>Пришли ссылку</b> на видео — и всё будет готово!"
     )
-
 
 @dp.message(Command("help"))
 async def cmd_help(message: types.Message):
     await message.answer(
         "<b>Как пользоваться</b>\n\n"
-        "1. Пришли ссылку на видео\n"
+        "1. Пришли ссылку\n"
         "2. Выбери качество\n"
         "3. Подожди — бот пришлёт файл\n\n"
         f"Лимиты:\n"
         f"• До 50 МБ — как видео\n"
         f"• 50–{MAX_FILE_SIZE_MB} МБ — как документ\n"
         f"• Больше {MAX_FILE_SIZE_MB} МБ — не скачаю\n\n"
-        "Если видео не скачивается — попробуй другую ссылку или качество."
+        "Если не работает — попробуй другую ссылку."
     )
-
 
 @dp.message()
 async def handle_link(message: types.Message):
@@ -80,12 +75,11 @@ async def handle_link(message: types.Message):
     user_id = message.from_user.id
     now = time.time()
 
-    # Анти-спам
     if user_id not in user_requests:
         user_requests[user_id] = []
     user_requests[user_id] = [t for t in user_requests[user_id] if now - t < 60]
     if len(user_requests[user_id]) >= REQUEST_LIMIT_PER_MINUTE:
-        await message.answer("Слишком много запросов подряд.\nПодожди минуту пожалуйста ⏳")
+        await message.answer("Слишком много запросов.\nПодожди минуту ⏳")
         return
     user_requests[user_id].append(now)
 
@@ -102,11 +96,14 @@ async def handle_link(message: types.Message):
             "nocheckcertificate": True,
         }
 
+        # Если хочешь добавить cookies Instagram — раскомментируй следующую строку
+        # "cookiefile": "cookies.txt",
+
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
 
             title = info.get("title", "Без названия")
-            uploader = info.get("uploader", "Неизвестный автор")
+            uploader = info.get("uploader", "Автор неизвестен")
             duration = info.get("duration", 0)
             duration_str = f"{duration // 60:02d}:{duration % 60:02d}" if duration else "—"
             thumbnail = info.get("thumbnail")
@@ -144,12 +141,11 @@ async def handle_link(message: types.Message):
                 await message.answer(caption, reply_markup=keyboard)
 
     except Exception as e:
-        logger.error(f"Ошибка обработки ссылки: {url} → {str(e)}", exc_info=True)
+        logger.error(f"Ошибка обработки ссылки {url}: {str(e)}", exc_info=True)
         await message.answer(
             "Не получилось обработать эту ссылку 😔\n"
             "Попробуй другую ссылку или пришли /help"
         )
-
 
 @dp.callback_query(lambda c: c.data.startswith("dl_"))
 async def process_download(callback: types.CallbackQuery):
@@ -179,6 +175,9 @@ async def process_download(callback: types.CallbackQuery):
             "socket_timeout": 60,
             "nocheckcertificate": True,
         }
+
+        # Если хочешь cookies — раскомментируй здесь тоже
+        # "cookiefile": "cookies.txt",
 
         with tempfile.TemporaryDirectory() as tmpdir:
             ydl_opts["outtmpl"] = os.path.join(tmpdir, "%(id)s.%(ext)s")
@@ -225,11 +224,9 @@ async def process_download(callback: types.CallbackQuery):
 
     await callback.answer()
 
-
 async def main():
     logger.info("Бот запущен")
     await dp.start_polling(bot)
-
 
 if __name__ == "__main__":
     asyncio.run(main())
