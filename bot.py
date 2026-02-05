@@ -35,10 +35,9 @@ user_requests = {}
 async def cmd_start(message: types.Message):
     await message.answer(
         "<b>Привет! 👋</b>\n\n"
-        "Скачиваю аудио и видео:\n\n"
-        "• YouTube (видео + Shorts) — только аудио\n"
-        "• Instagram Reels, TikTok, VK клипы/видео — видео + аудио\n"
-        "• Twitter/X и другие — видео или аудио\n\n"
+        "Скачиваю видео и аудио из:\n"
+        "• TikTok\n"
+        "• Instagram Reels\n\n"
         "<b>Пришли ссылку</b> — выбери, что скачать!"
     )
 
@@ -46,13 +45,11 @@ async def cmd_start(message: types.Message):
 async def cmd_help(message: types.Message):
     await message.answer(
         "<b>Как пользоваться</b>\n\n"
-        "1. Пришли ссылку на видео/клип\n"
-        "2. Выбери «Видео» или «Аудио» (если доступно)\n"
+        "1. Пришли ссылку на видео/клип из TikTok или Instagram Reels\n"
+        "2. Выбери «Видео» или «Аудио»\n"
         "3. Жди — бот пришлёт файл\n\n"
-        "Важно:\n"
-        "• С YouTube — только аудио (кнопки «Видео» нет)\n"
-        "• С Instagram, TikTok, VK — видео с нормальным звуком\n\n"
-        f"Лимит размера: {MAX_FILE_SIZE_MB} МБ"
+        f"Лимит размера: {MAX_FILE_SIZE_MB} МБ\n"
+        "Если не скачивается — попробуй другую ссылку."
     )
 
 @dp.message()
@@ -93,34 +90,28 @@ async def handle_link(message: types.Message):
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
 
+            extractor = info.get("extractor_key", "").lower()
+            if "tiktok" not in extractor and "instagram" not in extractor:
+                await message.answer("Поддерживаю только TikTok и Instagram Reels. Попробуй другую ссылку.")
+                return
+
             title = info.get("title", "Без названия")
             uploader = info.get("uploader", "Автор неизвестен")
             duration = info.get("duration", 0)
             duration_str = f"{int(duration) // 60:02d}:{int(duration) % 60:02d}" if duration and duration > 0 else "—"
             thumbnail = info.get("thumbnail")
 
-            extractor = info.get("extractor_key", "").lower()
-
             bot.full_url = url
 
-            # Определяем кнопки
-            if "youtube" in extractor:
-                keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                    [
-                        InlineKeyboardButton(text="Аудио", callback_data="dl_audio"),
-                        InlineKeyboardButton(text="Назад", callback_data="back")
-                    ]
-                ])
-            else:
-                keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                    [
-                        InlineKeyboardButton(text="Видео", callback_data="dl_video"),
-                        InlineKeyboardButton(text="Аудио", callback_data="dl_audio")
-                    ],
-                    [
-                        InlineKeyboardButton(text="Назад", callback_data="back")
-                    ]
-                ])
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [
+                    InlineKeyboardButton(text="Видео", callback_data="dl_video"),
+                    InlineKeyboardButton(text="Аудио", callback_data="dl_audio")
+                ],
+                [
+                    InlineKeyboardButton(text="Назад", callback_data="back")
+                ]
+            ])
 
             caption = (
                 f"<b>{title}</b>\n"
@@ -161,18 +152,10 @@ async def process_callback(callback: types.CallbackQuery):
     await callback.message.edit_caption(caption=f"Скачиваю {choice}... ⏳", reply_markup=None)
 
     try:
-        extractor = callback.message.caption.split("Источник: ")[-1].split("\n")[0].lower()
-
         if choice == "video":
-            if "youtube" in extractor:
-                format_str = "bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio/best"
-                real_choice = "audio"
-            else:
-                format_str = "bestvideo+bestaudio/best"
-                real_choice = "video"
+            format_str = "bestvideo+bestaudio/best"  # видео с аудио
         else:
-            format_str = "bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio/best"
-            real_choice = "audio"
+            format_str = "bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio/best"  # только аудио
 
         ydl_opts = {
             "format": format_str,
@@ -209,11 +192,11 @@ async def process_callback(callback: types.CallbackQuery):
                 f"Автор: {uploader}\n"
                 f"Длительность: {duration_str}\n"
                 f"Размер: {file_size_mb:.1f} МБ\n"
-                f"Тип: {'Аудио' if real_choice == 'audio' else 'Видео'}\n\n"
+                f"Тип: {'Аудио' if choice == 'audio' else 'Видео'}\n\n"
                 f"🤖 <a href=\"{BOT_LINK}\">Ещё</a>"
             )
 
-            if real_choice == "audio":
+            if choice == "audio":
                 await callback.message.answer_audio(
                     audio=FSInputFile(filename),
                     caption=caption,
@@ -247,4 +230,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-    
