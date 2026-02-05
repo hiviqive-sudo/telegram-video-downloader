@@ -10,7 +10,6 @@ from aiogram.types import FSInputFile, InlineKeyboardMarkup, InlineKeyboardButto
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
-# Логирование
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -21,13 +20,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Переменные из Railway
 API_TOKEN = os.getenv("API_TOKEN")
 MAX_FILE_SIZE_MB = int(os.getenv("MAX_FILE_SIZE_MB", "120"))
 REQUEST_LIMIT_PER_MINUTE = int(os.getenv("REQUEST_LIMIT_PER_MINUTE", "5"))
 
-# ←←← ИЗМЕНИТЕ ОБЯЗАТЕЛЬНО НА СВОЕГО БОТА!
-BOT_LINK = "https://t.me/myyvideodownloader_bot"   # например https://t.me/MyVideoDownloaderBot
+# ←←← ИЗМЕНИ НА СВОЕГО БОТА!
+BOT_LINK = "https://t.me/myyvideodownloader_bot"  # пример — замени на свой
 
 QUALITIES = {
     "360":  "bestvideo[height<=360][ext=mp4]/best[height<=360]/bestvideo[ext=mp4]+bestaudio/best",
@@ -46,9 +44,8 @@ user_requests = {}
 async def cmd_start(message: types.Message):
     await message.answer(
         "<b>Привет! 👋</b>\n\n"
-        "Я скачиваю видео из TikTok, Instagram Reels, YouTube, Twitter/X и др.\n"
-        "Без водяных знаков (где возможно).\n\n"
-        "<b>Пришли ссылку</b> на видео — и всё будет готово!"
+        "Я скачиваю видео из TikTok, Instagram Reels, YouTube и др.\n\n"
+        "<b>Пришли ссылку</b> — и всё будет готово!"
     )
 
 @dp.message(Command("help"))
@@ -61,15 +58,15 @@ async def cmd_help(message: types.Message):
         f"Лимиты:\n"
         f"• До 50 МБ — как видео\n"
         f"• 50–{MAX_FILE_SIZE_MB} МБ — как документ\n"
-        f"• Больше {MAX_FILE_SIZE_MB} МБ — не скачаю\n\n"
-        "Если не работает — попробуй другую ссылку."
+        f"• Больше — не скачаю\n\n"
+        "Для Instagram иногда нужны cookies."
     )
 
 @dp.message()
 async def handle_link(message: types.Message):
     url = message.text.strip()
     if not url.startswith(("http://", "https://")):
-        await message.answer("Это не похоже на ссылку.\nПришли пожалуйста ссылку на видео.")
+        await message.answer("Пришли ссылку на видео.")
         return
 
     user_id = message.from_user.id
@@ -79,7 +76,7 @@ async def handle_link(message: types.Message):
         user_requests[user_id] = []
     user_requests[user_id] = [t for t in user_requests[user_id] if now - t < 60]
     if len(user_requests[user_id]) >= REQUEST_LIMIT_PER_MINUTE:
-        await message.answer("Слишком много запросов.\nПодожди минуту ⏳")
+        await message.answer("Подожди минуту ⏳")
         return
     user_requests[user_id].append(now)
 
@@ -94,11 +91,8 @@ async def handle_link(message: types.Message):
             "fragment_retries": 5,
             "socket_timeout": 60,
             "nocheckcertificate": True,
-            'cookiesfrombrowser': 'chrome'
+            "cookiefile": "cookies.txt",  # ← это должно быть здесь
         }
-
-        # Если хочешь добавить cookies Instagram — раскомментируй следующую строку
-        # "cookiefile": "cookies.txt",
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
@@ -112,10 +106,7 @@ async def handle_link(message: types.Message):
             keyboard = InlineKeyboardMarkup(inline_keyboard=[])
             row = []
             for q_name in QUALITIES:
-                btn = InlineKeyboardButton(
-                    text=q_name,
-                    callback_data=f"dl_{q_name}_{url}"
-                )
+                btn = InlineKeyboardButton(text=q_name, callback_data=f"dl_{q_name}_{url}")
                 row.append(btn)
                 if len(row) == 3:
                     keyboard.inline_keyboard.append(row)
@@ -133,37 +124,27 @@ async def handle_link(message: types.Message):
             )
 
             if thumbnail:
-                await message.answer_photo(
-                    photo=thumbnail,
-                    caption=caption,
-                    reply_markup=keyboard
-                )
+                await message.answer_photo(photo=thumbnail, caption=caption, reply_markup=keyboard)
             else:
                 await message.answer(caption, reply_markup=keyboard)
 
     except Exception as e:
-        logger.error(f"Ошибка обработки ссылки {url}: {str(e)}", exc_info=True)
-        await message.answer(
-            "Не получилось обработать эту ссылку 😔\n"
-            "Попробуй другую ссылку или пришли /help"
-        )
+        logger.error(f"Ошибка: {url} → {str(e)}", exc_info=True)
+        await message.answer("Не получилось обработать ссылку 😔\nПопробуй другую.")
 
 @dp.callback_query(lambda c: c.data.startswith("dl_"))
 async def process_download(callback: types.CallbackQuery):
     try:
         _, quality, url = callback.data.split("_", 2)
     except:
-        await callback.answer("Что-то пошло не так", show_alert=True)
+        await callback.answer("Ошибка", show_alert=True)
         return
 
     if quality not in QUALITIES:
-        await callback.answer("Такого качества нет", show_alert=True)
+        await callback.answer("Нет такого качества", show_alert=True)
         return
 
-    await callback.message.edit_caption(
-        caption=f"Скачиваю в {quality}... ⏳",
-        reply_markup=None
-    )
+    await callback.message.edit_caption(caption=f"Скачиваю в {quality}... ⏳", reply_markup=None)
 
     try:
         ydl_opts = {
@@ -175,11 +156,8 @@ async def process_download(callback: types.CallbackQuery):
             "retries": 10,
             "socket_timeout": 60,
             "nocheckcertificate": True,
-            'cookiesfrombrowser': 'chrome'
+            "cookiefile": "cookies.txt",  # ← и здесь тоже
         }
-
-        # Если хочешь cookies — раскомментируй здесь тоже
-        # "cookiefile": "cookies.txt",
 
         with tempfile.TemporaryDirectory() as tmpdir:
             ydl_opts["outtmpl"] = os.path.join(tmpdir, "%(id)s.%(ext)s")
@@ -191,9 +169,7 @@ async def process_download(callback: types.CallbackQuery):
             file_size_mb = os.path.getsize(filename) / (1024 * 1024)
 
             if file_size_mb > MAX_FILE_SIZE_MB:
-                await callback.message.edit_caption(
-                    caption=f"Файл слишком большой ({file_size_mb:.1f} МБ)"
-                )
+                await callback.message.edit_caption(caption=f"Слишком большой файл ({file_size_mb:.1f} МБ)")
                 return
 
             title = info.get("title", "Видео")
@@ -205,24 +181,15 @@ async def process_download(callback: types.CallbackQuery):
             )
 
             if file_size_mb <= 50:
-                await callback.message.answer_video(
-                    video=FSInputFile(filename),
-                    caption=caption,
-                    supports_streaming=True
-                )
+                await callback.message.answer_video(video=FSInputFile(filename), caption=caption, supports_streaming=True)
             else:
-                await callback.message.answer_document(
-                    document=FSInputFile(filename),
-                    caption=caption
-                )
+                await callback.message.answer_document(document=FSInputFile(filename), caption=caption)
 
             await callback.message.delete()
 
     except Exception as e:
         logger.error(f"Ошибка скачивания {url} ({quality}): {str(e)}", exc_info=True)
-        await callback.message.edit_caption(
-            caption="Не удалось скачать в этом качестве 😔\nПопробуй другое качество или ссылку"
-        )
+        await callback.message.edit_caption(caption="Не удалось скачать 😔\nПопробуй другое качество.")
 
     await callback.answer()
 
