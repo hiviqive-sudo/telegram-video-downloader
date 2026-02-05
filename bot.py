@@ -50,7 +50,7 @@ async def cmd_help(message: types.Message):
         "2. Выбери «Видео» или «Аудио» (если доступно)\n"
         "3. Жди — бот пришлёт файл\n\n"
         "Важно:\n"
-        "• С YouTube скачивается только аудио\n"
+        "• С YouTube — только аудио (кнопки «Видео» нет)\n"
         "• С Instagram, TikTok, VK — видео с нормальным звуком\n\n"
         f"Лимит размера: {MAX_FILE_SIZE_MB} МБ"
     )
@@ -103,18 +103,22 @@ async def handle_link(message: types.Message):
 
             bot.full_url = url
 
-            # Определяем, какие кнопки показывать
+            # Определяем кнопки
             if "youtube" in extractor:
-                # Только аудио для YouTube
                 keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="Аудио", callback_data="dl_audio")]
+                    [
+                        InlineKeyboardButton(text="Аудио", callback_data="dl_audio"),
+                        InlineKeyboardButton(text="Назад", callback_data="back")
+                    ]
                 ])
             else:
-                # Видео + Аудио для всех остальных
                 keyboard = InlineKeyboardMarkup(inline_keyboard=[
                     [
                         InlineKeyboardButton(text="Видео", callback_data="dl_video"),
                         InlineKeyboardButton(text="Аудио", callback_data="dl_audio")
+                    ],
+                    [
+                        InlineKeyboardButton(text="Назад", callback_data="back")
                     ]
                 ])
 
@@ -140,19 +144,36 @@ async def handle_link(message: types.Message):
         logger.error(f"Ошибка обработки {url}: {str(e)}", exc_info=True)
         await message.answer("Не получилось обработать эту ссылку 😔\nПопробуй другую или /help")
 
-@dp.callback_query(lambda c: c.data in ["dl_video", "dl_audio"])
-async def process_download(callback: types.CallbackQuery):
+@dp.callback_query(lambda c: c.data in ["dl_video", "dl_audio", "back"])
+async def process_callback(callback: types.CallbackQuery):
+    if callback.data == "back":
+        await callback.message.delete()
+        await callback.message.answer(
+            "<b>Отменил выбор.</b>\n\n"
+            "Пришли новую ссылку или /start"
+        )
+        await callback.answer()
+        return
+
     choice = callback.data.split("_")[1]
     url = bot.full_url
 
     await callback.message.edit_caption(caption=f"Скачиваю {choice}... ⏳", reply_markup=None)
 
     try:
-        # Определяем формат в зависимости от выбора и источника
+        extractor = callback.message.caption.split("Источник: ")[-1].split("\n")[0].lower()
+
         if choice == "video":
-            format_str = "bestvideo+bestaudio/best"  # для Instagram, TikTok, VK
+            if "youtube" in extractor:
+                # YouTube — только аудио
+                format_str = "bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio/best"
+                real_choice = "audio"
+            else:
+                format_str = "bestvideo+bestaudio/best"
+                real_choice = "video"
         else:
             format_str = "bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio/best"
+            real_choice = "audio"
 
         ydl_opts = {
             "format": format_str,
@@ -189,11 +210,11 @@ async def process_download(callback: types.CallbackQuery):
                 f"Автор: {uploader}\n"
                 f"Длительность: {duration_str}\n"
                 f"Размер: {file_size_mb:.1f} МБ\n"
-                f"Тип: {'Аудио' if choice == 'audio' else 'Видео'}\n\n"
+                f"Тип: {'Аудио' if real_choice == 'audio' else 'Видео'}\n\n"
                 f"🤖 <a href=\"{BOT_LINK}\">Ещё</a>"
             )
 
-            if choice == "audio":
+            if real_choice == "audio":
                 await callback.message.answer_audio(
                     audio=FSInputFile(filename),
                     caption=caption,
