@@ -26,14 +26,6 @@ REQUEST_LIMIT_PER_MINUTE = int(os.getenv("REQUEST_LIMIT_PER_MINUTE", "5"))
 
 BOT_LINK = "https://t.me/myyvideodownloader_bot"  # ← замени на свой, если нужно
 
-QUALITIES = {
-    "360":  "bestvideo[height<=360][ext=mp4]/best[height<=360]/best[ext=mp4]",
-    "480":  "bestvideo[height<=480][ext=mp4]/best[height<=480]/best[ext=mp4]",
-    "720":  "bestvideo[height<=720][ext=mp4]/best[height<=720]/best[ext=mp4]",
-    "1080": "bestvideo[height<=1080][ext=mp4]/best[height<=1080]/best[ext=mp4]",
-    "Audio": "bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio/best",
-}
-
 bot = Bot(token=API_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
 
@@ -43,19 +35,19 @@ user_requests = {}
 async def cmd_start(message: types.Message):
     await message.answer(
         "<b>Привет! 👋</b>\n\n"
-        "Скачиваю видео из TikTok, Instagram Reels, YouTube, Twitter/X и др.\n"
-        "Без водяных знаков (где возможно).\n\n"
-        "<b>Пришли ссылку</b> на видео!"
+        "Я скачиваю видео или аудио из TikTok, Instagram Reels, YouTube и др.\n\n"
+        "<b>Пришли ссылку</b> на видео — и выбери, что скачать!"
     )
 
 @dp.message(Command("help"))
 async def cmd_help(message: types.Message):
     await message.answer(
         "<b>Как пользоваться</b>\n\n"
-        "1. Пришли ссылку\n"
-        "2. Выбери качество (360, 480, 720, 1080, Audio)\n"
+        "1. Пришли ссылку на видео\n"
+        "2. Выбери «Видео» или «Аудио»\n"
         "3. Жди — бот пришлёт файл\n\n"
-        "Если качество не меняется — сайт не предоставляет низкое разрешение."
+        f"Лимит: до {MAX_FILE_SIZE_MB} МБ\n\n"
+        "Поддерживаю Instagram, TikTok, YouTube и другие."
     )
 
 @dp.message()
@@ -102,32 +94,25 @@ async def handle_link(message: types.Message):
             duration_str = f"{int(duration) // 60:02d}:{int(duration) % 60:02d}" if duration and duration > 0 else "—"
             thumbnail = info.get("thumbnail")
 
-            short_url = url.split("?")[0] if "?" in url else url
+            # Сохраняем полную ссылку
+            bot.full_url = url
 
-            keyboard = InlineKeyboardMarkup(inline_keyboard=[])
-            row = []
-            for q_name in QUALITIES:
-                btn = InlineKeyboardButton(
-                    text=q_name,
-                    callback_data=f"dl_{q_name}_{short_url}"
-                )
-                row.append(btn)
-                if len(row) == 3:
-                    keyboard.inline_keyboard.append(row)
-                    row = []
-            if row:
-                keyboard.inline_keyboard.append(row)
+            # Кнопки выбора: Видео или Аудио
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [
+                    InlineKeyboardButton(text="Видео", callback_data=f"dl_video_{url.split('?')[0]}"),
+                    InlineKeyboardButton(text="Аудио", callback_data=f"dl_audio_{url.split('?')[0]}")
+                ]
+            ])
 
             caption = (
                 f"<b>{title}</b>\n"
                 f"Автор: {uploader}\n"
                 f"Длительность: {duration_str}\n"
                 f"Источник: {info.get('extractor_key', 'сайт')}\n\n"
-                f"Выбери качество:\n\n"
-                f"🤖 <a href=\"{BOT_LINK}\">Ещё видео</a>"
+                f"Выбери, что скачать:\n\n"
+                f"🤖 <a href=\"{BOT_LINK}\">Ещё</a>"
             )
-
-            bot.full_url = url  # сохраняем полную ссылку
 
             if thumbnail:
                 await message.answer_photo(
@@ -145,22 +130,23 @@ async def handle_link(message: types.Message):
 @dp.callback_query(lambda c: c.data.startswith("dl_"))
 async def process_download(callback: types.CallbackQuery):
     try:
-        _, quality, short_url = callback.data.split("_", 2)
+        _, choice, short_url = callback.data.split("_", 2)
     except:
         await callback.answer("Ошибка", show_alert=True)
         return
 
-    if quality not in QUALITIES:
-        await callback.answer("Нет такого качества", show_alert=True)
-        return
+    url = bot.full_url  # полная ссылка
 
-    url = bot.full_url
-
-    await callback.message.edit_caption(caption=f"Скачиваю в {quality}... ⏳", reply_markup=None)
+    await callback.message.edit_caption(caption=f"Скачиваю {choice}... ⏳", reply_markup=None)
 
     try:
+        if choice == "video":
+            format_str = "best[ext=mp4]/best"
+        else:  # audio
+            format_str = "bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio/best"
+
         ydl_opts = {
-            "format": QUALITIES[quality],
+            "format": format_str,
             "outtmpl": "%(id)s.%(ext)s",
             "quiet": True,
             "no_warnings": True,
@@ -169,7 +155,6 @@ async def process_download(callback: types.CallbackQuery):
             "socket_timeout": 60,
             "nocheckcertificate": True,
             "cookiefile": "cookies.txt",
-            "merge_output_format": "mp4" if quality != "Audio" else None,
         }
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -185,25 +170,26 @@ async def process_download(callback: types.CallbackQuery):
                 await callback.message.edit_caption(caption=f"Файл слишком большой ({file_size_mb:.1f} МБ)")
                 return
 
-            # Получаем реальное разрешение после скачивания
-            real_height = info.get("height", "неизвестно")
-            real_format = f"{real_height}p" if real_height != "неизвестно" else quality
+            title = info.get("title", "Файл")
+            uploader = info.get("uploader", "Автор неизвестен")
+            duration = info.get("duration", 0)
+            duration_str = f"{int(duration) // 60:02d}:{int(duration) % 60:02d}" if duration and duration > 0 else "—"
 
-            title = info.get("title", "Видео")
             caption = (
                 f"<b>{title}</b>\n"
-                f"Качество: {real_format} ({quality})\n"
+                f"Автор: {uploader}\n"
+                f"Длительность: {duration_str}\n"
                 f"Размер: {file_size_mb:.1f} МБ\n"
-                f"Тип: {'Аудио' if quality == 'Audio' else 'Видео'}\n\n"
-                f"🤖 <a href=\"{BOT_LINK}\">Ещё видео</a>"
+                f"Тип: {'Аудио' if choice == 'audio' else 'Видео'}\n\n"
+                f"🤖 <a href=\"{BOT_LINK}\">Ещё</a>"
             )
 
-            if quality == "Audio":
+            if choice == "audio":
                 await callback.message.answer_audio(
                     audio=FSInputFile(filename),
                     caption=caption,
                     title=title,
-                    performer=info.get("uploader", "Автор неизвестен")
+                    performer=uploader
                 )
             elif file_size_mb <= 50:
                 await callback.message.answer_video(
@@ -220,8 +206,8 @@ async def process_download(callback: types.CallbackQuery):
             await callback.message.delete()
 
     except Exception as e:
-        logger.error(f"Ошибка скачивания {url} ({quality}): {str(e)}", exc_info=True)
-        await callback.message.edit_caption(caption="Не получилось скачать 😔\nПопробуй другое качество.")
+        logger.error(f"Ошибка скачивания {url} ({choice}): {str(e)}", exc_info=True)
+        await callback.message.edit_caption(caption="Не получилось скачать 😔\nПопробуй другую ссылку.")
 
     await callback.answer()
 
