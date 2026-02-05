@@ -35,13 +35,11 @@ user_requests = {}
 async def cmd_start(message: types.Message):
     await message.answer(
         "<b>Привет! 👋</b>\n\n"
-        "Скачиваю видео и аудио из:\n"
-        "• YouTube (видео + Shorts)\n"
-        "• TikTok\n"
-        "• Instagram Reels\n"
-        "• VK клипы и видео\n"
-        "• Twitter/X и др.\n\n"
-        "<b>Пришли ссылку</b> — выбери видео или аудио!"
+        "Скачиваю аудио и видео:\n\n"
+        "• YouTube (видео + Shorts) — только аудио\n"
+        "• Instagram Reels, TikTok, VK клипы/видео — видео + аудио\n"
+        "• Twitter/X и другие — видео или аудио\n\n"
+        "<b>Пришли ссылку</b> — выбери, что скачать!"
     )
 
 @dp.message(Command("help"))
@@ -49,11 +47,12 @@ async def cmd_help(message: types.Message):
     await message.answer(
         "<b>Как пользоваться</b>\n\n"
         "1. Пришли ссылку на видео/клип\n"
-        "2. Выбери «Видео» или «Аудио»\n"
+        "2. Выбери «Видео» или «Аудио» (если доступно)\n"
         "3. Жди — бот пришлёт файл\n\n"
-        "Поддерживаю YouTube, Shorts, TikTok, Instagram, VK, Twitter/X и др.\n\n"
-        f"Лимит: {MAX_FILE_SIZE_MB} МБ\n"
-        "Если ошибка — попробуй другую ссылку."
+        "Важно:\n"
+        "• С YouTube скачивается только аудио\n"
+        "• С Instagram, TikTok, VK — видео с нормальным звуком\n\n"
+        f"Лимит размера: {MAX_FILE_SIZE_MB} МБ"
     )
 
 @dp.message()
@@ -100,14 +99,24 @@ async def handle_link(message: types.Message):
             duration_str = f"{int(duration) // 60:02d}:{int(duration) % 60:02d}" if duration and duration > 0 else "—"
             thumbnail = info.get("thumbnail")
 
+            extractor = info.get("extractor_key", "").lower()
+
             bot.full_url = url
 
-            keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [
-                    InlineKeyboardButton(text="Видео", callback_data="dl_video"),
-                    InlineKeyboardButton(text="Аудио", callback_data="dl_audio")
-                ]
-            ])
+            # Определяем, какие кнопки показывать
+            if "youtube" in extractor:
+                # Только аудио для YouTube
+                keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="Аудио", callback_data="dl_audio")]
+                ])
+            else:
+                # Видео + Аудио для всех остальных
+                keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                    [
+                        InlineKeyboardButton(text="Видео", callback_data="dl_video"),
+                        InlineKeyboardButton(text="Аудио", callback_data="dl_audio")
+                    ]
+                ])
 
             caption = (
                 f"<b>{title}</b>\n"
@@ -139,9 +148,9 @@ async def process_download(callback: types.CallbackQuery):
     await callback.message.edit_caption(caption=f"Скачиваю {choice}... ⏳", reply_markup=None)
 
     try:
+        # Определяем формат в зависимости от выбора и источника
         if choice == "video":
-            # Гибкий формат — берёт любое доступное видео (без ffmpeg)
-            format_str = "bestvideo+bestaudio/best/best"
+            format_str = "bestvideo+bestaudio/best"  # для Instagram, TikTok, VK
         else:
             format_str = "bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio/best"
 
@@ -191,17 +200,18 @@ async def process_download(callback: types.CallbackQuery):
                     title=title,
                     performer=uploader
                 )
-            elif file_size_mb <= 50:
-                await callback.message.answer_video(
-                    video=FSInputFile(filename),
-                    caption=caption,
-                    supports_streaming=True
-                )
             else:
-                await callback.message.answer_document(
-                    document=FSInputFile(filename),
-                    caption=caption
-                )
+                if file_size_mb <= 50:
+                    await callback.message.answer_video(
+                        video=FSInputFile(filename),
+                        caption=caption,
+                        supports_streaming=True
+                    )
+                else:
+                    await callback.message.answer_document(
+                        document=FSInputFile(filename),
+                        caption=caption
+                    )
 
             await callback.message.delete()
 
