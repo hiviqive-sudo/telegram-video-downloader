@@ -94,7 +94,7 @@ async def handle_link(message: types.Message):
             "fragment_retries": 5,
             "socket_timeout": 60,
             "nocheckcertificate": True,
-            'cookiefile': 'cookies.txt',
+            'cookiesfrombrowser': 'chrome'
         }
 
         # Если хочешь добавить cookies Instagram — раскомментируй следующую строку
@@ -175,7 +175,7 @@ async def process_download(callback: types.CallbackQuery):
             "retries": 10,
             "socket_timeout": 60,
             "nocheckcertificate": True,
-            'cookiefile': 'cookies.txt',
+            'cookiesfrombrowser': 'chrome'
         }
 
         # Если хочешь cookies — раскомментируй здесь тоже
