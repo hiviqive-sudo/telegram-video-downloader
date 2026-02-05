@@ -24,7 +24,7 @@ API_TOKEN = os.getenv("API_TOKEN")
 MAX_FILE_SIZE_MB = int(os.getenv("MAX_FILE_SIZE_MB", "120"))
 REQUEST_LIMIT_PER_MINUTE = int(os.getenv("REQUEST_LIMIT_PER_MINUTE", "5"))
 
-BOT_LINK = "https://t.me/myyvideodownloader_bot"  # ← здесь username твоего бота
+BOT_LINK = "https://t.me/myyvideodownloader_bot"  # ← username твоего бота
 
 bot = Bot(token=API_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
@@ -51,9 +51,9 @@ async def cmd_help(message: types.Message):
         "1. Пришли ссылку на видео/клип\n"
         "2. Выбери «Видео» или «Аудио»\n"
         "3. Жди — бот пришлёт файл\n\n"
-        "Поддерживаю YouTube, Shorts, TikTok, Instagram, VK клипы, Twitter/X и др.\n\n"
+        "Поддерживаю YouTube, Shorts, TikTok, Instagram, VK, Twitter/X и др.\n\n"
         f"Лимит размера: {MAX_FILE_SIZE_MB} МБ\n"
-        "Если не скачивается — попробуй другую ссылку."
+        "Если ошибка — попробуй другую ссылку."
     )
 
 @dp.message()
@@ -64,7 +64,7 @@ async def handle_link(message: types.Message):
         return
 
     if "t.me/" in url.lower():
-        await message.answer("Это ссылка на Telegram. Пришли ссылку на видео/клип с сайта!")
+        await message.answer("Это ссылка на Telegram. Пришли ссылку на видео/клип!")
         return
 
     user_id = message.from_user.id
@@ -140,7 +140,7 @@ async def process_download(callback: types.CallbackQuery):
 
     try:
         if choice == "video":
-            # Гибкий формат для YouTube/Shorts/VK — берёт лучшее доступное видео + аудио
+            # Самый гибкий формат — берёт лучшее доступное видео + аудио
             format_str = "bestvideo+bestaudio/best"
         else:
             format_str = "bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio/best"
@@ -155,6 +155,7 @@ async def process_download(callback: types.CallbackQuery):
             "socket_timeout": 60,
             "nocheckcertificate": True,
             "cookiefile": "cookies.txt",
+            "merge_output_format": "mp4" if choice == "video" else None,
         }
 
         with tempfile.TemporaryDirectory() as tmpdir:
