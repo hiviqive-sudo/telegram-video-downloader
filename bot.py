@@ -140,8 +140,8 @@ async def process_download(callback: types.CallbackQuery):
 
     try:
         if choice == "video":
-            # Гибкий формат — берёт любое доступное видео (без жёсткого требования mp4)
-            format_str = "bestvideo+bestaudio/best"
+            # Гибкий формат — берёт любое доступное видео (без ffmpeg)
+            format_str = "bestvideo+bestaudio/best/best"
         else:
             format_str = "bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio/best"
 
@@ -175,16 +175,12 @@ async def process_download(callback: types.CallbackQuery):
             duration = info.get("duration", 0)
             duration_str = f"{int(duration) // 60:02d}:{int(duration) % 60:02d}" if duration and duration > 0 else "—"
 
-            # Добавляем реальное разрешение видео (если есть)
-            real_resolution = info.get("resolution", info.get("height", "неизвестно"))
-            real_type = f"{real_resolution}p" if real_resolution != "неизвестно" else "Видео"
-
             caption = (
                 f"<b>{title}</b>\n"
                 f"Автор: {uploader}\n"
                 f"Длительность: {duration_str}\n"
                 f"Размер: {file_size_mb:.1f} МБ\n"
-                f"Тип: {'Аудио' if choice == 'audio' else real_type}\n\n"
+                f"Тип: {'Аудио' if choice == 'audio' else 'Видео'}\n\n"
                 f"🤖 <a href=\"{BOT_LINK}\">Ещё</a>"
             )
 
