@@ -1,4 +1,18 @@
-     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+import asyncio
+import logging
+import tempfile
+import os
+import time
+import yt_dlp
+from aiogram import Bot, Dispatcher, types
+from aiogram.filters import CommandStart, Command
+from aiogram.types import FSInputFile, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ParseMode
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.FileHandler("bot_errors.log"),
         logging.StreamHandler()
@@ -22,24 +36,24 @@ async def cmd_start(message: types.Message):
     await message.answer(
         "<b>Привет! 👋</b>\n\n"
         "Скачиваю видео и аудио из:\n"
+        "• YouTube (видео + Shorts)\n"
         "• TikTok\n"
-        "• Instagram Reels\n\n"
         "• Instagram Reels\n"
-        "• VK Клипы/Видео\n"
-        "• YouTube Shorts/Видео\n\n"
-        "<b>Пришли ссылку</b> — выбери, что скачать!"
+        "• VK клипы и видео\n"
+        "• Twitter/X и др.\n\n"
+        "<b>Пришли ссылку</b> — выбери видео или аудио!"
     )
 
 @dp.message(Command("help"))
 async def cmd_help(message: types.Message):
     await message.answer(
         "<b>Как пользоваться</b>\n\n"
-        "1. Пришли ссылку на видео/клип из TikTok или Instagram Reels\n"
-        "1. Пришли ссылку на видео/клип из TikTok, Instagram Reels, VK или YouTube\n"
+        "1. Пришли ссылку на видео/клип\n"
         "2. Выбери «Видео» или «Аудио»\n"
         "3. Жди — бот пришлёт файл\n\n"
-        f"Лимит размера: {MAX_FILE_SIZE_MB} МБ\n"
-        "Если не скачивается — попробуй другую ссылку."
+        "Поддерживаю YouTube, Shorts, TikTok, Instagram, VK, Twitter/X и др.\n\n"
+        f"Лимит: {MAX_FILE_SIZE_MB} МБ\n"
+        "Если ошибка — попробуй другую ссылку."
     )
 
 @dp.message()
@@ -80,14 +94,6 @@ async def handle_link(message: types.Message):
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
 
-            extractor = info.get("extractor_key", "").lower()
-            if "tiktok" not in extractor and "instagram" not in extractor:
-                await message.answer("Поддерживаю только TikTok и Instagram Reels. Попробуй другую ссылку.")
-            supported_extractors = ("tiktok", "instagram", "youtube", "vk")
-            if not any(name in extractor for name in supported_extractors):
-                await message.answer("Поддерживаю только TikTok, Instagram Reels, VK и YouTube. Попробуй другую ссылку.")
-                return
-
             title = info.get("title", "Без названия")
             uploader = info.get("uploader", "Автор неизвестен")
             duration = info.get("duration", 0)
@@ -100,9 +106,6 @@ async def handle_link(message: types.Message):
                 [
                     InlineKeyboardButton(text="Видео", callback_data="dl_video"),
                     InlineKeyboardButton(text="Аудио", callback_data="dl_audio")
-                ],
-                [
-                    InlineKeyboardButton(text="Назад", callback_data="back")
                 ]
             ])
 
@@ -110,26 +113,26 @@ async def handle_link(message: types.Message):
                 f"<b>{title}</b>\n"
                 f"Автор: {uploader}\n"
                 f"Длительность: {duration_str}\n"
-                f"Источник: {extractor.upper()}\n\n"
-@@ -139,64 +142,69 @@ async def handle_link(message: types.Message):
-        elif "ffmpeg" in error_msg:
-            error_text = "Ошибка: не удалось скачать (ffmpeg не установлен)"
-        else:
-            error_text = "Не получилось скачать 😔\nПопробуй другую ссылку."
+                f"Источник: {info.get('extractor_key', 'сайт')}\n\n"
+                f"Что скачать:\n\n"
+                f"🤖 <a href=\"{BOT_LINK}\">Ещё</a>"
+            )
 
-        await message.answer(error_text)
+            if thumbnail:
+                await message.answer_photo(
+                    photo=thumbnail,
+                    caption=caption,
+                    reply_markup=keyboard
+                )
+            else:
+                await message.answer(caption, reply_markup=keyboard)
 
-@dp.callback_query(lambda c: c.data in ["dl_video", "dl_audio", "back"])
-async def process_callback(callback: types.CallbackQuery):
-    if callback.data == "back":
-        await callback.message.delete()
-        await callback.message.answer(
-            "<b>Отменил выбор.</b>\n\n"
-            "Пришли новую ссылку или /start"
-        )
-        await callback.answer()
-        return
+    except Exception as e:
+        logger.error(f"Ошибка обработки {url}: {str(e)}", exc_info=True)
+        await message.answer("Не получилось обработать эту ссылку 😔\nПопробуй другую или /help")
 
+@dp.callback_query(lambda c: c.data in ["dl_video", "dl_audio"])
+async def process_download(callback: types.CallbackQuery):
     choice = callback.data.split("_")[1]
     url = bot.full_url
 
@@ -137,10 +140,10 @@ async def process_callback(callback: types.CallbackQuery):
 
     try:
         if choice == "video":
-            format_str = "bestvideo[ext=mp4]/best[ext=mp4]/best"
-            format_str = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best"
+            # Самый гибкий формат — берёт любое доступное видео + аудио
+            format_str = "bestvideo+bestaudio/best"
         else:
-            format_str = "bestaudio[ext=m4a]/bestaudio/best"
+            format_str = "bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio/best"
 
         ydl_opts = {
             "format": format_str,
@@ -152,11 +155,7 @@ async def process_callback(callback: types.CallbackQuery):
             "socket_timeout": 60,
             "nocheckcertificate": True,
             "cookiefile": "cookies.txt",
-            "merge_output_format": "mp4",
-            "postprocessors": [
-                {"key": "FFmpegVideoConvertor", "preferedformat": "mp4"}
-            ],
-            "format_sort": ["ext:mp4", "acodec:m4a"],
+            "merge_output_format": "mp4" if choice == "video" else None,
         }
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -182,3 +181,40 @@ async def process_callback(callback: types.CallbackQuery):
                 f"Автор: {uploader}\n"
                 f"Длительность: {duration_str}\n"
                 f"Размер: {file_size_mb:.1f} МБ\n"
+                f"Тип: {'Аудио' if choice == 'audio' else 'Видео'}\n\n"
+                f"🤖 <a href=\"{BOT_LINK}\">Ещё</a>"
+            )
+
+            if choice == "audio":
+                await callback.message.answer_audio(
+                    audio=FSInputFile(filename),
+                    caption=caption,
+                    title=title,
+                    performer=uploader
+                )
+            elif file_size_mb <= 50:
+                await callback.message.answer_video(
+                    video=FSInputFile(filename),
+                    caption=caption,
+                    supports_streaming=True
+                )
+            else:
+                await callback.message.answer_document(
+                    document=FSInputFile(filename),
+                    caption=caption
+                )
+
+            await callback.message.delete()
+
+    except Exception as e:
+        logger.error(f"Ошибка скачивания {url} ({choice}): {str(e)}", exc_info=True)
+        await callback.message.edit_caption(caption="Не получилось скачать 😔\nПопробуй другую ссылку.")
+
+    await callback.answer()
+
+async def main():
+    logger.info("Бот запущен")
+    await dp.start_polling(bot)
+
+if __name__ == "__main__":
+    asyncio.run(main())
