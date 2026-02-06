@@ -36,24 +36,20 @@ async def cmd_start(message: types.Message):
     await message.answer(
         "<b>Привет! 👋</b>\n\n"
         "Скачиваю видео и аудио из:\n"
-        "• YouTube (видео + Shorts)\n"
         "• TikTok\n"
-        "• Instagram Reels\n"
-        "• VK клипы и видео\n"
-        "• Twitter/X и др.\n\n"
-        "<b>Пришли ссылку</b> — выбери видео или аудио!"
+        "• Instagram Reels\n\n"
+        "<b>Пришли ссылку</b> — выбери, что скачать!"
     )
 
 @dp.message(Command("help"))
 async def cmd_help(message: types.Message):
     await message.answer(
         "<b>Как пользоваться</b>\n\n"
-        "1. Пришли ссылку на видео/клип\n"
+        "1. Пришли ссылку на видео/клип из TikTok или Instagram Reels\n"
         "2. Выбери «Видео» или «Аудио»\n"
         "3. Жди — бот пришлёт файл\n\n"
-        "Поддерживаю YouTube, Shorts, TikTok, Instagram, VK, Twitter/X и др.\n\n"
-        f"Лимит: {MAX_FILE_SIZE_MB} МБ\n"
-        "Если ошибка — попробуй другую ссылку."
+        f"Лимит размера: {MAX_FILE_SIZE_MB} МБ\n"
+        "Если не скачивается — попробуй другую ссылку."
     )
 
 @dp.message()
@@ -94,6 +90,11 @@ async def handle_link(message: types.Message):
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
 
+            extractor = info.get("extractor_key", "").lower()
+            if "tiktok" not in extractor and "instagram" not in extractor:
+                await message.answer("Поддерживаю только TikTok и Instagram Reels. Попробуй другую ссылку.")
+                return
+
             title = info.get("title", "Без названия")
             uploader = info.get("uploader", "Автор неизвестен")
             duration = info.get("duration", 0)
@@ -106,6 +107,9 @@ async def handle_link(message: types.Message):
                 [
                     InlineKeyboardButton(text="Видео", callback_data="dl_video"),
                     InlineKeyboardButton(text="Аудио", callback_data="dl_audio")
+                ],
+                [
+                    InlineKeyboardButton(text="Назад", callback_data="back")
                 ]
             ])
 
@@ -113,7 +117,7 @@ async def handle_link(message: types.Message):
                 f"<b>{title}</b>\n"
                 f"Автор: {uploader}\n"
                 f"Длительность: {duration_str}\n"
-                f"Источник: {info.get('extractor_key', 'сайт')}\n\n"
+                f"Источник: {extractor.upper()}\n\n"
                 f"Что скачать:\n\n"
                 f"🤖 <a href=\"{BOT_LINK}\">Ещё</a>"
             )
@@ -129,10 +133,27 @@ async def handle_link(message: types.Message):
 
     except Exception as e:
         logger.error(f"Ошибка обработки {url}: {str(e)}", exc_info=True)
-        await message.answer("Не получилось обработать эту ссылку 😔\nПопробуй другую или /help")
+        error_msg = str(e)
+        if "login required" in error_msg:
+            error_text = "Ошибка: требуется авторизация (обнови cookies.txt)"
+        elif "ffmpeg" in error_msg:
+            error_text = "Ошибка: не удалось скачать (ffmpeg не установлен)"
+        else:
+            error_text = "Не получилось скачать 😔\nПопробуй другую ссылку."
 
-@dp.callback_query(lambda c: c.data in ["dl_video", "dl_audio"])
-async def process_download(callback: types.CallbackQuery):
+        await message.answer(error_text)
+
+@dp.callback_query(lambda c: c.data in ["dl_video", "dl_audio", "back"])
+async def process_callback(callback: types.CallbackQuery):
+    if callback.data == "back":
+        await callback.message.delete()
+        await callback.message.answer(
+            "<b>Отменил выбор.</b>\n\n"
+            "Пришли новую ссылку или /start"
+        )
+        await callback.answer()
+        return
+
     choice = callback.data.split("_")[1]
     url = bot.full_url
 
@@ -140,10 +161,9 @@ async def process_download(callback: types.CallbackQuery):
 
     try:
         if choice == "video":
-            # Самый гибкий формат — берёт любое доступное видео + аудио
-            format_str = "bestvideo+bestaudio/best"
+            format_str = "bestvideo[ext=mp4]/best[ext=mp4]/best"
         else:
-            format_str = "bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio/best"
+            format_str = "bestaudio[ext=m4a]/bestaudio/best"
 
         ydl_opts = {
             "format": format_str,
@@ -155,7 +175,6 @@ async def process_download(callback: types.CallbackQuery):
             "socket_timeout": 60,
             "nocheckcertificate": True,
             "cookiefile": "cookies.txt",
-            "merge_output_format": "mp4" if choice == "video" else None,
         }
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -192,23 +211,32 @@ async def process_download(callback: types.CallbackQuery):
                     title=title,
                     performer=uploader
                 )
-            elif file_size_mb <= 50:
-                await callback.message.answer_video(
-                    video=FSInputFile(filename),
-                    caption=caption,
-                    supports_streaming=True
-                )
             else:
-                await callback.message.answer_document(
-                    document=FSInputFile(filename),
-                    caption=caption
-                )
+                if file_size_mb <= 50:
+                    await callback.message.answer_video(
+                        video=FSInputFile(filename),
+                        caption=caption,
+                        supports_streaming=True
+                    )
+                else:
+                    await callback.message.answer_document(
+                        document=FSInputFile(filename),
+                        caption=caption
+                    )
 
             await callback.message.delete()
 
     except Exception as e:
         logger.error(f"Ошибка скачивания {url} ({choice}): {str(e)}", exc_info=True)
-        await callback.message.edit_caption(caption="Не получилось скачать 😔\nПопробуй другую ссылку.")
+        error_msg = str(e)
+        if "ffmpeg" in error_msg:
+            error_text = "Ошибка: не удалось скачать (ffmpeg не установлен)"
+        elif "login required" in error_msg:
+            error_text = "Ошибка: требуется авторизация (обнови cookies.txt)"
+        else:
+            error_text = f"Не получилось скачать 😔\nПричина: {error_msg[:100]}"
+
+        await callback.message.edit_caption(caption=error_text)
 
     await callback.answer()
 
