@@ -151,7 +151,7 @@ async def process_callback(callback: types.CallbackQuery):
 
     try:
         if choice == "video":
-            format_str = "bestvideo+bestaudio/best"  # видео + аудио (для YouTube Shorts тоже работает)
+            format_str = "bestvideo+bestaudio/best"  # видео + аудио для YouTube Shorts
         else:
             format_str = "bestaudio[ext=m4a]/bestaudio/best"
 
@@ -226,5 +226,7 @@ async def main():
     logger.info("Бот запущен")
     await dp.start_polling(bot)
 
+if __name__ == "__main__":
+    asyncio.run(main())
 if __name__ == "__main__":
     asyncio.run(main())
