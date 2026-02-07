@@ -27,7 +27,7 @@ REQUEST_LIMIT_PER_MINUTE = int(os.getenv("REQUEST_LIMIT_PER_MINUTE", "5"))
 BOT_LINK = "https://t.me/myyvideodownloader_bot"  # ← username твоего бота
 
 # Список каналов, на которые нужно подписаться (замени на свои @username)
-REQUIRED_CHANNELS = ["@jgfdfdgdg", "@infopull_official"]  # ← укажи свои каналы (минимум 1)
+REQUIRED_CHANNELS = ["@jgfdfdgdg", "https://t.me/+AfKNOoS0oz82MzJi"]  # ← здесь укажи свои каналы
 
 bot = Bot(token=API_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
@@ -35,13 +35,14 @@ dp = Dispatcher()
 user_requests = {}
 
 async def is_subscribed(user_id: int) -> bool:
-    """Проверяет, подписан ли пользователь на все нужные каналы"""
+    """Проверяет подписку на все каналы"""
     for channel in REQUIRED_CHANNELS:
         try:
             member = await bot.get_chat_member(chat_id=channel, user_id=user_id)
             if member.status in ["left", "kicked"]:
                 return False
-        except Exception:
+        except Exception as e:
+            logger.error(f"Ошибка проверки подписки на {channel}: {str(e)}")
             return False
     return True
 
@@ -147,7 +148,7 @@ async def handle_link(message: types.Message):
         logger.error(f"Ошибка обработки {url}: {str(e)}", exc_info=True)
         await message.answer("Не получилось обработать эту ссылку 😔\nПопробуй другую или /help")
 
-@dp.callback_query(lambda c: c.data in ["dl_video", "dl_audio", "back"])
+@dp.callback_query(lambda c: c.data in ["dl_video", "dl_audio", "back", "check_sub"])
 async def process_callback(callback: types.CallbackQuery):
     user_id = callback.from_user.id
 
@@ -160,21 +161,34 @@ async def process_callback(callback: types.CallbackQuery):
         await callback.answer()
         return
 
-    choice = callback.data.split("_")[1]
-    url = bot.full_url
-
-    # Проверка подписки
-    if not await is_subscribed(user_id):
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="Подписаться на каналы", url="https://t.me/channel1")],  # ← замени на свои каналы
-            [InlineKeyboardButton(text="Проверить подписку", callback_data="check_sub")]
-        ])
-        await callback.message.edit_caption(
-            caption="Подпишись на каналы, чтобы скачать:",
-            reply_markup=keyboard
-        )
+    if callback.data == "check_sub":
+        if await is_subscribed(user_id):
+            await callback.message.edit_caption(
+                caption="Подписка проверена! Выбери, что скачать:",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [
+                        InlineKeyboardButton(text="Видео", callback_data="dl_video"),
+                        InlineKeyboardButton(text="Аудио", callback_data="dl_audio")
+                    ],
+                    [
+                        InlineKeyboardButton(text="Назад", callback_data="back")
+                    ]
+                ])
+            )
+        else:
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="Подписаться на каналы", url="https://t.me/channel1")],  # ← замени на свои каналы
+                [InlineKeyboardButton(text="Проверить подписку", callback_data="check_sub")]
+            ])
+            await callback.message.edit_caption(
+                caption="Ещё не подписан на все каналы. Подпишись и нажми «Проверить»!",
+                reply_markup=keyboard
+            )
         await callback.answer()
         return
+
+    choice = callback.data.split("_")[1]
+    url = bot.full_url
 
     await callback.message.edit_caption(caption=f"Скачиваю {choice}... ⏳", reply_markup=None)
 
@@ -249,29 +263,6 @@ async def process_callback(callback: types.CallbackQuery):
         logger.error(f"Ошибка скачивания {url} ({choice}): {str(e)}", exc_info=True)
         await callback.message.edit_caption(caption="Не получилось скачать 😔\nПопробуй другую ссылку.")
 
-    await callback.answer()
-
-# Проверка подписки после нажатия кнопки
-@dp.callback_query(lambda c: c.data == "check_sub")
-async def check_subscription(callback: types.CallbackQuery):
-    user_id = callback.from_user.id
-    if await is_subscribed(user_id):
-        await callback.message.edit_caption(caption="Подписка проверена! Скачиваю...", reply_markup=None)
-        # Здесь можно сразу запустить скачивание или попросить выбрать качество
-        await callback.message.answer("Выбери, что скачать:", reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="Видео", callback_data="dl_video")],
-            [InlineKeyboardButton(text="Аудио", callback_data="dl_audio")],
-            [InlineKeyboardButton(text="Назад", callback_data="back")]
-        ]))
-    else:
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="Подписаться на каналы", url="https://t.me/channel1")],
-            [InlineKeyboardButton(text="Проверить подписку", callback_data="check_sub")]
-        ])
-        await callback.message.edit_caption(
-            caption="Ещё не подписан на все каналы. Подпишись и нажми «Проверить»!",
-            reply_markup=keyboard
-        )
     await callback.answer()
 
 async def main():
