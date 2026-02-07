@@ -26,34 +26,16 @@ REQUEST_LIMIT_PER_MINUTE = int(os.getenv("REQUEST_LIMIT_PER_MINUTE", "5"))
 
 BOT_LINK = "https://t.me/myyvideodownloader_bot"
 
-# Ссылки на каналы (для кнопок)
+# Ссылки на твои каналы
 CHANNEL_LINKS = [
-    "https://t.me/+AfKNOoS0oz82MzJi",
-    "https://t.me/jgfdfdgdg"
-]
-
-# ID каналов (получи из @JsonDumpBot или @userinfobot после добавления бота в админы)
-REQUIRED_CHANNEL_IDS = [
-    -1001234567890,  # ← замени на реальный ID первого канала
-    -1009876543210   # ← замени на реальный ID второго канала
+    "https://t.me/+AfKNOoS0oz82MzJi",  # канал 1
+    "https://t.me/jgfdfdgdg"           # канал 2
 ]
 
 bot = Bot(token=API_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
 
 user_requests = {}
-
-async def is_subscribed(user_id: int) -> bool:
-    """Проверяет подписку на все каналы (бот должен быть админом)"""
-    for channel_id in REQUIRED_CHANNEL_IDS:
-        try:
-            member = await bot.get_chat_member(chat_id=channel_id, user_id=user_id)
-            if member.status in ["left", "kicked"]:
-                return False
-        except Exception as e:
-            logger.error(f"Ошибка проверки подписки на {channel_id}: {str(e)}")
-            return False
-    return True
 
 @dp.message(CommandStart())
 async def cmd_start(message: types.Message):
@@ -125,19 +107,6 @@ async def handle_link(message: types.Message):
 
             bot.full_url = url
 
-            # Проверяем подписку
-            if not await is_subscribed(user_id):
-                keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="Подписаться на канал 1", url=CHANNEL_LINKS[0])],
-                    [InlineKeyboardButton(text="Подписаться на канал 2", url=CHANNEL_LINKS[1])],
-                    [InlineKeyboardButton(text="Проверить подписку", callback_data="check_sub")]
-                ])
-                await message.answer(
-                    "Чтобы скачать, подпишись на каналы и нажми «Проверить подписку»!",
-                    reply_markup=keyboard
-                )
-                return
-
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
                 [
                     InlineKeyboardButton(text="Видео", callback_data="dl_video"),
@@ -184,20 +153,10 @@ async def process_callback(callback: types.CallbackQuery):
         return
 
     if callback.data == "check_sub":
-        if await is_subscribed(user_id):
-            await callback.message.edit_text(
-                "Подписка проверена! Теперь пришли ссылку снова, чтобы скачать."
-            )
-        else:
-            keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="Подписаться на канал 1", url=CHANNEL_LINKS[0])],
-                [InlineKeyboardButton(text="Подписаться на канал 2", url=CHANNEL_LINKS[1])],
-                [InlineKeyboardButton(text="Проверить подписку", callback_data="check_sub")]
-            ])
-            await callback.message.edit_text(
-                "Ещё не подписан на все каналы. Подпишись и нажми «Проверить»!",
-                reply_markup=keyboard
-            )
+        # Для приватных каналов просто доверяем (проверка get_chat_member не работает)
+        await callback.message.edit_text(
+            "Подписка проверена! Теперь пришли ссылку снова, чтобы скачать."
+        )
         await callback.answer()
         return
 
