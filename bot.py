@@ -27,7 +27,7 @@ REQUEST_LIMIT_PER_MINUTE = int(os.getenv("REQUEST_LIMIT_PER_MINUTE", "5"))
 BOT_LINK = "https://t.me/myyvideodownloader_bot"  # ← username твоего бота
 
 # Список каналов, на которые нужно подписаться (замени на свои @username)
-REQUIRED_CHANNELS = ["@jgfdfdgdg", "https://t.me/+AfKNOoS0oz82MzJi"]  # ← укажи свои каналы (минимум 1)
+REQUIRED_CHANNELS = ["@jgfdfdgdg", "@infopull_official"]  # ← укажи свои каналы (минимум 1)
 
 bot = Bot(token=API_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
