@@ -24,13 +24,7 @@ API_TOKEN = os.getenv("API_TOKEN")
 MAX_FILE_SIZE_MB = int(os.getenv("MAX_FILE_SIZE_MB", "120"))
 REQUEST_LIMIT_PER_MINUTE = int(os.getenv("REQUEST_LIMIT_PER_MINUTE", "5"))
 
-BOT_LINK = "https://t.me/myyvideodownloader_bot"
-
-# Ссылки на твои каналы
-CHANNEL_LINKS = [
-    "https://t.me/+AfKNOoS0oz82MzJi",  # канал 1
-    "https://t.me/jgfdfdgdg"           # канал 2
-]
+BOT_LINK = "https://t.me/myyvideodownloader_bot"  # ← username твоего бота
 
 bot = Bot(token=API_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
@@ -41,7 +35,11 @@ user_requests = {}
 async def cmd_start(message: types.Message):
     await message.answer(
         "<b>Привет! 👋</b>\n\n"
-        "Скачиваю видео и аудио из TikTok и Instagram Reels.\n\n"
+        "Скачиваю видео и аудио из:\n"
+        "• TikTok\n"
+        "• Instagram Reels\n"
+        "• YouTube (видео + Shorts — видео + аудио)\n"
+        "• VK Shorts/клипы\n\n"
         "<b>Пришли ссылку</b> — выбери, что скачать!"
     )
 
@@ -49,11 +47,11 @@ async def cmd_start(message: types.Message):
 async def cmd_help(message: types.Message):
     await message.answer(
         "<b>Как пользоваться</b>\n\n"
-        "1. Пришли ссылку на видео/клип из TikTok или Instagram Reels\n"
-        "2. Подпишись на каналы (если нужно)\n"
-        "3. Выбери «Видео» или «Аудио»\n"
-        "4. Жди — бот пришлёт файл\n\n"
-        f"Лимит размера: {MAX_FILE_SIZE_MB} МБ"
+        "1. Пришли ссылку из TikTok, Instagram Reels, YouTube или VK Shorts/клипов\n"
+        "2. Выбери «Видео» или «Аудио»\n"
+        "3. Жди — бот пришлёт файл\n\n"
+        f"Лимит размера: {MAX_FILE_SIZE_MB} МБ\n"
+        "Если не скачивается — попробуй другую ссылку."
     )
 
 @dp.message()
@@ -95,10 +93,6 @@ async def handle_link(message: types.Message):
             info = ydl.extract_info(url, download=False)
 
             extractor = info.get("extractor_key", "").lower()
-            if "tiktok" not in extractor and "instagram" not in extractor:
-                await message.answer("Поддерживаю только TikTok и Instagram Reels. Попробуй другую ссылку.")
-                return
-
             title = info.get("title", "Без названия")
             uploader = info.get("uploader", "Автор неизвестен")
             duration = info.get("duration", 0)
@@ -139,10 +133,8 @@ async def handle_link(message: types.Message):
         logger.error(f"Ошибка обработки {url}: {str(e)}", exc_info=True)
         await message.answer("Не получилось обработать эту ссылку 😔\nПопробуй другую или /help")
 
-@dp.callback_query(lambda c: c.data in ["dl_video", "dl_audio", "back", "check_sub"])
+@dp.callback_query(lambda c: c.data in ["dl_video", "dl_audio", "back"])
 async def process_callback(callback: types.CallbackQuery):
-    user_id = callback.from_user.id
-
     if callback.data == "back":
         await callback.message.delete()
         await callback.message.answer(
@@ -152,22 +144,14 @@ async def process_callback(callback: types.CallbackQuery):
         await callback.answer()
         return
 
-    if callback.data == "check_sub":
-        # Для приватных каналов просто доверяем (проверка get_chat_member не работает)
-        await callback.message.edit_text(
-            "Подписка проверена! Теперь пришли ссылку снова, чтобы скачать."
-        )
-        await callback.answer()
-        return
-
     choice = callback.data.split("_")[1]
     url = bot.full_url
 
-    await callback.message.edit_text("Скачиваю... ⏳")
+    await callback.message.edit_caption(caption=f"Скачиваю {choice}... ⏳", reply_markup=None)
 
     try:
         if choice == "video":
-            format_str = "best[ext=mp4]/best"
+            format_str = "bestvideo+bestaudio/best"  # видео + аудио (для YouTube Shorts тоже работает)
         else:
             format_str = "bestaudio[ext=m4a]/bestaudio/best"
 
@@ -193,7 +177,7 @@ async def process_callback(callback: types.CallbackQuery):
             file_size_mb = os.path.getsize(filename) / (1024 * 1024)
 
             if file_size_mb > MAX_FILE_SIZE_MB:
-                await callback.message.edit_text(f"Файл слишком большой ({file_size_mb:.1f} МБ)")
+                await callback.message.edit_caption(caption=f"Файл слишком большой ({file_size_mb:.1f} МБ)")
                 return
 
             title = info.get("title", "Файл")
@@ -234,7 +218,7 @@ async def process_callback(callback: types.CallbackQuery):
 
     except Exception as e:
         logger.error(f"Ошибка скачивания {url} ({choice}): {str(e)}", exc_info=True)
-        await callback.message.edit_text("Не получилось скачать 😔\nПопробуй другую ссылку.")
+        await callback.message.edit_caption(caption="Не получилось скачать 😔\nПопробуй другую ссылку.")
 
     await callback.answer()
 
