@@ -9,6 +9,10 @@ from aiogram.filters import CommandStart, Command
 from aiogram.types import FSInputFile, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
+from aiogram.exceptions import TelegramBadRequest
+
+# Список каналов, на которые нужно подписаться (замени на свои @username)
+REQUIRED_CHANNELS = ["https://t.me/+AfKNOoS0oz82MzJi", "@jgfdfdgdg"]  # ← укажи свои каналы
 
 logging.basicConfig(
     level=logging.INFO,
@@ -24,12 +28,23 @@ API_TOKEN = os.getenv("API_TOKEN")
 MAX_FILE_SIZE_MB = int(os.getenv("MAX_FILE_SIZE_MB", "120"))
 REQUEST_LIMIT_PER_MINUTE = int(os.getenv("REQUEST_LIMIT_PER_MINUTE", "5"))
 
-BOT_LINK = "https://t.me/myyvideodownloader_bot"  # ← username твоего бота
+BOT_LINK = "https://t.me/myyvideodownloader_bot"
 
 bot = Bot(token=API_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
 
 user_requests = {}
+
+async def is_subscribed(user_id: int) -> bool:
+    """Проверяет, подписан ли пользователь на все нужные каналы"""
+    for channel in REQUIRED_CHANNELS:
+        try:
+            member = await bot.get_chat_member(chat_id=channel, user_id=user_id)
+            if member.status in ["left", "kicked"]:
+                return False
+        except Exception:
+            return False
+    return True
 
 @dp.message(CommandStart())
 async def cmd_start(message: types.Message):
@@ -46,8 +61,7 @@ async def cmd_help(message: types.Message):
         "1. Пришли ссылку на видео/клип из TikTok или Instagram Reels\n"
         "2. Выбери «Видео» или «Аудио»\n"
         "3. Жди — бот пришлёт файл\n\n"
-        f"Лимит размера: {MAX_FILE_SIZE_MB} МБ\n"
-        "Если видео без звука — попробуй 'Аудио'."
+        f"Лимит размера: {MAX_FILE_SIZE_MB} МБ"
     )
 
 @dp.message()
@@ -115,7 +129,7 @@ async def handle_link(message: types.Message):
                 f"<b>{title}</b>\n"
                 f"Автор: {uploader}\n"
                 f"Длительность: {duration_str}\n"
-                f"Источник: {info.get('extractor_key', 'сайт')}\n\n"
+                f"Источник: {extractor.upper()}\n\n"
                 f"Что скачать:\n\n"
                 f"🤖 <a href=\"{BOT_LINK}\">Ещё</a>"
             )
@@ -144,14 +158,28 @@ async def process_callback(callback: types.CallbackQuery):
         await callback.answer()
         return
 
+    user_id = callback.from_user.id
     choice = callback.data.split("_")[1]
     url = bot.full_url
+
+    # Проверка подписки (если хочешь добавить позже)
+    # if not await is_subscribed(user_id):
+    #     keyboard = InlineKeyboardMarkup(inline_keyboard=[
+    #         [InlineKeyboardButton(text="Подписаться на каналы", url="https://t.me/channel1")],
+    #         [InlineKeyboardButton(text="Проверить подписку", callback_data="check_sub")]
+    #     ])
+    #     await callback.message.edit_caption(
+    #         caption="Подпишись на каналы, чтобы скачать:",
+    #         reply_markup=keyboard
+    #     )
+    #     await callback.answer()
+    #     return
 
     await callback.message.edit_caption(caption=f"Скачиваю {choice}... ⏳", reply_markup=None)
 
     try:
         if choice == "video":
-            format_str = "best[ext=mp4]/best"  # готовый mp4 с аудио (без +bestaudio, чтобы без ffmpeg)
+            format_str = "best[ext=mp4]/best"  # готовый mp4 с аудио
         else:
             format_str = "bestaudio[ext=m4a]/bestaudio/best"
 
