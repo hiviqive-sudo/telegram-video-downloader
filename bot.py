@@ -35,9 +35,7 @@ user_requests = {}
 async def cmd_start(message: types.Message):
     await message.answer(
         "<b>Привет! 👋</b>\n\n"
-        "Скачиваю видео и аудио из:\n"
-        "• TikTok\n"
-        "• Instagram Reels\n\n"
+        "Скачиваю видео и аудио из TikTok и Instagram Reels.\n\n"
         "<b>Пришли ссылку</b> — выбери, что скачать!"
     )
 
@@ -49,7 +47,7 @@ async def cmd_help(message: types.Message):
         "2. Выбери «Видео» или «Аудио»\n"
         "3. Жди — бот пришлёт файл\n\n"
         f"Лимит размера: {MAX_FILE_SIZE_MB} МБ\n"
-        "Если не скачивается — попробуй другую ссылку."
+        "Если видео без звука — попробуй 'Аудио'."
     )
 
 @dp.message()
@@ -117,7 +115,7 @@ async def handle_link(message: types.Message):
                 f"<b>{title}</b>\n"
                 f"Автор: {uploader}\n"
                 f"Длительность: {duration_str}\n"
-                f"Источник: {extractor.upper()}\n\n"
+                f"Источник: {info.get('extractor_key', 'сайт')}\n\n"
                 f"Что скачать:\n\n"
                 f"🤖 <a href=\"{BOT_LINK}\">Ещё</a>"
             )
@@ -133,15 +131,7 @@ async def handle_link(message: types.Message):
 
     except Exception as e:
         logger.error(f"Ошибка обработки {url}: {str(e)}", exc_info=True)
-        error_msg = str(e)
-        if "login required" in error_msg:
-            error_text = "Ошибка: требуется авторизация (обнови cookies.txt)"
-        elif "ffmpeg" in error_msg:
-            error_text = "Ошибка: не удалось скачать (ffmpeg не установлен)"
-        else:
-            error_text = "Не получилось скачать 😔\nПопробуй другую ссылку."
-
-        await message.answer(error_text)
+        await message.answer("Не получилось обработать эту ссылку 😔\nПопробуй другую или /help")
 
 @dp.callback_query(lambda c: c.data in ["dl_video", "dl_audio", "back"])
 async def process_callback(callback: types.CallbackQuery):
@@ -161,7 +151,7 @@ async def process_callback(callback: types.CallbackQuery):
 
     try:
         if choice == "video":
-            format_str = "bestvideo[ext=mp4]/best[ext=mp4]/best"
+            format_str = "best[ext=mp4]/best"  # готовый mp4 с аудио (без +bestaudio, чтобы без ffmpeg)
         else:
             format_str = "bestaudio[ext=m4a]/bestaudio/best"
 
@@ -228,15 +218,7 @@ async def process_callback(callback: types.CallbackQuery):
 
     except Exception as e:
         logger.error(f"Ошибка скачивания {url} ({choice}): {str(e)}", exc_info=True)
-        error_msg = str(e)
-        if "ffmpeg" in error_msg:
-            error_text = "Ошибка: не удалось скачать (ffmpeg не установлен)"
-        elif "login required" in error_msg:
-            error_text = "Ошибка: требуется авторизация (обнови cookies.txt)"
-        else:
-            error_text = f"Не получилось скачать 😔\nПричина: {error_msg[:100]}"
-
-        await callback.message.edit_caption(caption=error_text)
+        await callback.message.edit_caption(caption="Не получилось скачать 😔\nПопробуй другую ссылку.")
 
     await callback.answer()
 
