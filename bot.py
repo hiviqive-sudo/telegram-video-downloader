@@ -35,7 +35,10 @@ user_requests = {}
 async def cmd_start(message: types.Message):
     await message.answer(
         "<b>Привет! 👋</b>\n\n"
-        "Скачиваю видео и аудио из VK клипов.\n\n"
+        "Скачиваю видео и аудио из:\n"
+        "• TikTok\n"
+        "• Instagram Reels\n"
+        "• VK клипы\n\n"
         "<b>Пришли ссылку</b> — выбери, что скачать!"
     )
 
@@ -43,7 +46,7 @@ async def cmd_start(message: types.Message):
 async def cmd_help(message: types.Message):
     await message.answer(
         "<b>Как пользоваться</b>\n\n"
-        "1. Пришли ссылку на VK клип\n"
+        "1. Пришли ссылку на видео/клип из TikTok, Instagram Reels или VK клипов\n"
         "2. Выбери «Видео» или «Аудио»\n"
         "3. Жди — бот пришлёт файл\n\n"
         f"Лимит размера: {MAX_FILE_SIZE_MB} МБ\n"
@@ -89,8 +92,9 @@ async def handle_link(message: types.Message):
             info = ydl.extract_info(url, download=False)
 
             extractor = info.get("extractor_key", "").lower()
-            if "vk" not in extractor:
-                await message.answer("Поддерживаю только VK клипы. Попробуй другую ссылку.")
+            supported = ["tiktok", "instagram", "vk"]
+            if not any(s in extractor for s in supported):
+                await message.answer("Поддерживаю только TikTok, Instagram Reels и VK клипы. Попробуй другую ссылку.")
                 return
 
             title = info.get("title", "Без названия")
