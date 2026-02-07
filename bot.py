@@ -26,7 +26,7 @@ REQUEST_LIMIT_PER_MINUTE = int(os.getenv("REQUEST_LIMIT_PER_MINUTE", "5"))
 
 BOT_LINK = "https://t.me/myyvideodownloader_bot"  # ← username твоего бота
 
-# Реклама после скачивания (замени на свой канал или ссылку)
+# Реклама после скачивания (замени на свой канал)
 AD_TEXT = (
     "Спасибо за использование! ❤️\n"
     "Подпишись на мой основной канал для крутого контента:\n"
@@ -40,12 +40,18 @@ dp = Dispatcher()
 user_requests = {}
 
 # Прогресс-бар
-async def progress_hook(d, message: types.Message):
+async def progress_hook(d, progress_msg: types.Message):
     if d['status'] == 'downloading':
         percent = d.get('_percent_str', '0%')
-        await message.edit_caption(caption=f"Скачиваю... {percent}")
+        try:
+            await progress_msg.edit_caption(caption=f"Скачиваю... {percent}")
+        except Exception:
+            pass  # Если сообщение уже удалено — игнорируем
     elif d['status'] == 'finished':
-        await message.edit_caption(caption="Готово! Отправляю файл... ⏳")
+        try:
+            await progress_msg.edit_caption(caption="Готово! Отправляю файл... ⏳")
+        except Exception:
+            pass
 
 @dp.message(CommandStart())
 async def cmd_start(message: types.Message):
@@ -172,7 +178,7 @@ async def process_callback(callback: types.CallbackQuery):
                 asyncio.create_task(progress_msg.edit_caption("Готово! Отправляю файл... ⏳"))
 
         if choice == "video":
-            format_str = "best[ext=mp4]/best"
+            format_str = "best[ext=mp4]/best"  # готовый mp4 с аудио
         else:
             format_str = "bestaudio[ext=m4a]/bestaudio/best"
 
