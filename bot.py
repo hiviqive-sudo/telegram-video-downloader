@@ -30,7 +30,7 @@ BOT_LINK = "https://t.me/myyvideodownloader_bot"  # ← username твоего б
 AD_TEXT = (
     "Спасибо за использование! ❤️\n"
     "Подпишись на мой основной канал для крутого контента:\n"
-    "👉 @infopull_official\n"
+    "👉 @твой_канал\n"
     "Ещё больше полезного — заходи!"
 )
 
@@ -38,20 +38,6 @@ bot = Bot(token=API_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTM
 dp = Dispatcher()
 
 user_requests = {}
-
-# Прогресс-бар
-async def progress_hook(d, progress_msg: types.Message):
-    if d['status'] == 'downloading':
-        percent = d.get('_percent_str', '0%')
-        try:
-            await progress_msg.edit_caption(caption=f"Скачиваю... {percent}")
-        except Exception:
-            pass  # Если сообщение уже удалено — игнорируем
-    elif d['status'] == 'finished':
-        try:
-            await progress_msg.edit_caption(caption="Готово! Отправляю файл... ⏳")
-        except Exception:
-            pass
 
 @dp.message(CommandStart())
 async def cmd_start(message: types.Message):
@@ -65,7 +51,7 @@ async def cmd_start(message: types.Message):
 async def cmd_help(message: types.Message):
     await message.answer(
         "<b>Как пользоваться</b>\n\n"
-        "1. Пришли ссылку на видео/клип\n"
+        "1. Пришли ссылку на видео/клип из TikTok, Instagram Reels или VK\n"
         "2. Выбери «Видео 🎥» или «Аудио 🎵»\n"
         "3. Жди — бот пришлёт файл\n\n"
         f"Лимит размера: {MAX_FILE_SIZE_MB} МБ\n"
@@ -167,16 +153,9 @@ async def process_callback(callback: types.CallbackQuery):
     choice = callback.data.split("_")[1]
     url = bot.full_url
 
-    progress_msg = await callback.message.edit_caption(caption="Скачиваю... 0% ⏳", reply_markup=None)
+    await callback.message.edit_caption(caption=f"Скачиваю {choice}... ⏳", reply_markup=None)
 
     try:
-        def progress_hook(d):
-            if d['status'] == 'downloading':
-                percent = d.get('_percent_str', '0%')
-                asyncio.create_task(progress_msg.edit_caption(f"Скачиваю... {percent}"))
-            elif d['status'] == 'finished':
-                asyncio.create_task(progress_msg.edit_caption("Готово! Отправляю файл... ⏳"))
-
         if choice == "video":
             format_str = "best[ext=mp4]/best"  # готовый mp4 с аудио
         else:
@@ -192,7 +171,6 @@ async def process_callback(callback: types.CallbackQuery):
             "socket_timeout": 60,
             "nocheckcertificate": True,
             "cookiefile": "cookies.txt",
-            "progress_hooks": [progress_hook],
         }
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -205,7 +183,7 @@ async def process_callback(callback: types.CallbackQuery):
             file_size_mb = os.path.getsize(filename) / (1024 * 1024)
 
             if file_size_mb > MAX_FILE_SIZE_MB:
-                await progress_msg.edit_caption(caption=f"Файл слишком большой ({file_size_mb:.1f} МБ)")
+                await callback.message.edit_caption(caption=f"Файл слишком большой ({file_size_mb:.1f} МБ)")
                 return
 
             title = info.get("title", "Файл")
@@ -242,7 +220,7 @@ async def process_callback(callback: types.CallbackQuery):
                         caption=caption
                     )
 
-            await progress_msg.delete()
+            await callback.message.delete()
 
             # Автоматическое удаление файла после отправки
             os.remove(filename)
@@ -252,7 +230,7 @@ async def process_callback(callback: types.CallbackQuery):
 
     except Exception as e:
         logger.error(f"Ошибка скачивания {url} ({choice}): {str(e)}", exc_info=True)
-        await progress_msg.edit_caption(caption="Не получилось скачать 😔\nПопробуй другую ссылку.")
+        await callback.message.edit_caption(caption="Не получилось скачать 😔\nПопробуй другую ссылку.")
 
     await callback.answer()
 
