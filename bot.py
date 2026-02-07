@@ -24,12 +24,12 @@ API_TOKEN = os.getenv("API_TOKEN")
 MAX_FILE_SIZE_MB = int(os.getenv("MAX_FILE_SIZE_MB", "120"))
 REQUEST_LIMIT_PER_MINUTE = int(os.getenv("REQUEST_LIMIT_PER_MINUTE", "5"))
 
-BOT_LINK = "https://t.me/myyvideodownloader_bot"  # ← username твоего бота
+BOT_LINK = "https://t.me/myyvideodownloader_bot"
 
-# Твои каналы (ID или @username — для приватных каналов используй ID)
+# Твои каналы (используем chat_id для приватных групп)
 REQUIRED_CHANNELS = [
-    "@+AfKNOoS0oz82MzJi",  # https://t.me/+AfKNOoS0oz82MzJi
-    "@jgfdfdgdg"            # https://t.me/jgfdfdgdg
+    -100AfKNOoS0oz82MzJi,  # https://t.me/+AfKNOoS0oz82MzJi
+    "@jgfdfdgdg"            # https://t.me/jgfdfdgdg — если публичный, оставь @username
 ]
 
 bot = Bot(token=API_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
@@ -122,8 +122,8 @@ async def handle_link(message: types.Message):
             # Проверяем подписку сразу
             if not await is_subscribed(user_id):
                 keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="Подписаться на каналы", url="https://t.me/+AfKNOoS0oz82MzJi")],
-                    [InlineKeyboardButton(text="Подписаться на второй канал", url="https://t.me/jgfdfdgdg")],
+                    [InlineKeyboardButton(text="Подписаться на канал ", url="https://t.me/+AfKNOoS0oz82MzJi")],
+                    [InlineKeyboardButton(text="Подписаться на канал ", url="https://t.me/jgfdfdgdg")],
                     [InlineKeyboardButton(text="Проверить подписку", callback_data="check_sub")]
                 ])
                 await message.answer(
@@ -184,12 +184,12 @@ async def process_callback(callback: types.CallbackQuery):
             )
         else:
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="Подписаться на каналы", url="https://t.me/+AfKNOoS0oz82MzJi")],
-                [InlineKeyboardButton(text="Подписаться на второй канал", url="https://t.me/jgfdfdgdg")],
+                [InlineKeyboardButton(text="Подписаться на канал ", url="https://t.me/+AfKNOoS0oz82MzJi")],
+                [InlineKeyboardButton(text="Подписаться на канал ", url="https://t.me/jgfdfdgdg")],
                 [InlineKeyboardButton(text="Проверить подписку", callback_data="check_sub")]
             ])
-            await callback.message.edit_caption(
-                caption="Ещё не подписан на все каналы. Подпишись и нажми «Проверить»!",
+            await callback.message.edit_text(
+                "Ещё не подписан на все каналы. Подпишись и нажми «Проверить»!",
                 reply_markup=keyboard
             )
         await callback.answer()
@@ -198,7 +198,7 @@ async def process_callback(callback: types.CallbackQuery):
     choice = callback.data.split("_")[1]
     url = bot.full_url
 
-    await callback.message.edit_caption(caption=f"Скачиваю {choice}... ⏳", reply_markup=None)
+    await callback.message.edit_text("Скачиваю... ⏳")
 
     try:
         if choice == "video":
@@ -228,7 +228,7 @@ async def process_callback(callback: types.CallbackQuery):
             file_size_mb = os.path.getsize(filename) / (1024 * 1024)
 
             if file_size_mb > MAX_FILE_SIZE_MB:
-                await callback.message.edit_caption(caption=f"Файл слишком большой ({file_size_mb:.1f} МБ)")
+                await callback.message.edit_text(f"Файл слишком большой ({file_size_mb:.1f} МБ)")
                 return
 
             title = info.get("title", "Файл")
@@ -269,7 +269,7 @@ async def process_callback(callback: types.CallbackQuery):
 
     except Exception as e:
         logger.error(f"Ошибка скачивания {url} ({choice}): {str(e)}", exc_info=True)
-        await callback.message.edit_caption(caption="Не получилось скачать 😔\nПопробуй другую ссылку.")
+        await callback.message.edit_text("Не получилось скачать 😔\nПопробуй другую ссылку.")
 
     await callback.answer()
 
