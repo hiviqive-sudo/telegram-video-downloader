@@ -26,19 +26,32 @@ REQUEST_LIMIT_PER_MINUTE = int(os.getenv("REQUEST_LIMIT_PER_MINUTE", "5"))
 
 BOT_LINK = "https://t.me/myyvideodownloader_bot"  # ← username твоего бота
 
+# Реклама после скачивания (замени на свой канал или ссылку)
+AD_TEXT = (
+    "Спасибо за использование! ❤️\n"
+    "Подпишись на мой основной канал для крутого контента:\n"
+    "👉 @infopull_official\n"
+    "Ещё больше полезного — заходи!"
+)
+
 bot = Bot(token=API_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
 
 user_requests = {}
 
+# Прогресс-бар
+async def progress_hook(d, message: types.Message):
+    if d['status'] == 'downloading':
+        percent = d.get('_percent_str', '0%')
+        await message.edit_caption(caption=f"Скачиваю... {percent}")
+    elif d['status'] == 'finished':
+        await message.edit_caption(caption="Готово! Отправляю файл... ⏳")
+
 @dp.message(CommandStart())
 async def cmd_start(message: types.Message):
     await message.answer(
         "<b>Привет! 👋</b>\n\n"
-        "Скачиваю видео и аудио из:\n"
-        "• TikTok\n"
-        "• Instagram Reels\n"
-        "• VK клипы\n\n"
+        "Скачиваю видео и аудио из TikTok, Instagram Reels и VK клипов.\n\n"
         "<b>Пришли ссылку</b> — выбери, что скачать!"
     )
 
@@ -46,11 +59,11 @@ async def cmd_start(message: types.Message):
 async def cmd_help(message: types.Message):
     await message.answer(
         "<b>Как пользоваться</b>\n\n"
-        "1. Пришли ссылку на видео/клип из TikTok, Instagram Reels или VK клипов\n"
-        "2. Выбери «Видео» или «Аудио»\n"
+        "1. Пришли ссылку на видео/клип\n"
+        "2. Выбери «Видео 🎥» или «Аудио 🎵»\n"
         "3. Жди — бот пришлёт файл\n\n"
         f"Лимит размера: {MAX_FILE_SIZE_MB} МБ\n"
-        "Если не скачивается — попробуй другую ссылку."
+        "Если ошибка — попробуй другую ссылку."
     )
 
 @dp.message()
@@ -107,11 +120,11 @@ async def handle_link(message: types.Message):
 
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
                 [
-                    InlineKeyboardButton(text="Видео", callback_data="dl_video"),
-                    InlineKeyboardButton(text="Аудио", callback_data="dl_audio")
+                    InlineKeyboardButton(text="Видео 🎥", callback_data="dl_video"),
+                    InlineKeyboardButton(text="Аудио 🎵", callback_data="dl_audio")
                 ],
                 [
-                    InlineKeyboardButton(text="Назад", callback_data="back")
+                    InlineKeyboardButton(text="Назад ⬅️", callback_data="back")
                 ]
             ])
 
@@ -141,21 +154,25 @@ async def handle_link(message: types.Message):
 async def process_callback(callback: types.CallbackQuery):
     if callback.data == "back":
         await callback.message.delete()
-        await callback.message.answer(
-            "<b>Отменил выбор.</b>\n\n"
-            "Пришли новую ссылку или /start"
-        )
+        await callback.message.answer("<b>Отменил выбор.</b>\n\nПришли новую ссылку или /start")
         await callback.answer()
         return
 
     choice = callback.data.split("_")[1]
     url = bot.full_url
 
-    await callback.message.edit_caption(caption=f"Скачиваю {choice}... ⏳", reply_markup=None)
+    progress_msg = await callback.message.edit_caption(caption="Скачиваю... 0% ⏳", reply_markup=None)
 
     try:
+        def progress_hook(d):
+            if d['status'] == 'downloading':
+                percent = d.get('_percent_str', '0%')
+                asyncio.create_task(progress_msg.edit_caption(f"Скачиваю... {percent}"))
+            elif d['status'] == 'finished':
+                asyncio.create_task(progress_msg.edit_caption("Готово! Отправляю файл... ⏳"))
+
         if choice == "video":
-            format_str = "best[ext=mp4]/best"  # готовый mp4 с аудио
+            format_str = "best[ext=mp4]/best"
         else:
             format_str = "bestaudio[ext=m4a]/bestaudio/best"
 
@@ -169,6 +186,7 @@ async def process_callback(callback: types.CallbackQuery):
             "socket_timeout": 60,
             "nocheckcertificate": True,
             "cookiefile": "cookies.txt",
+            "progress_hooks": [progress_hook],
         }
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -181,7 +199,7 @@ async def process_callback(callback: types.CallbackQuery):
             file_size_mb = os.path.getsize(filename) / (1024 * 1024)
 
             if file_size_mb > MAX_FILE_SIZE_MB:
-                await callback.message.edit_caption(caption=f"Файл слишком большой ({file_size_mb:.1f} МБ)")
+                await progress_msg.edit_caption(caption=f"Файл слишком большой ({file_size_mb:.1f} МБ)")
                 return
 
             title = info.get("title", "Файл")
@@ -218,11 +236,17 @@ async def process_callback(callback: types.CallbackQuery):
                         caption=caption
                     )
 
-            await callback.message.delete()
+            await progress_msg.delete()
+
+            # Автоматическое удаление файла после отправки
+            os.remove(filename)
+
+            # Реклама после скачивания
+            await callback.message.answer(AD_TEXT)
 
     except Exception as e:
         logger.error(f"Ошибка скачивания {url} ({choice}): {str(e)}", exc_info=True)
-        await callback.message.edit_caption(caption="Не получилось скачать 😔\nПопробуй другую ссылку.")
+        await progress_msg.edit_caption(caption="Не получилось скачать 😔\nПопробуй другую ссылку.")
 
     await callback.answer()
 
