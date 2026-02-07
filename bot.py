@@ -30,7 +30,7 @@ BOT_LINK = "https://t.me/myyvideodownloader_bot"  # ← username твоего б
 AD_TEXT = (
     "Спасибо за использование! ❤️\n"
     "Подпишись на мой основной канал для крутого контента:\n"
-    "👉 @твой_канал\n"
+    "👉 @infopull_official\n"
     "Ещё больше полезного — заходи!"
 )
 
@@ -43,7 +43,7 @@ user_requests = {}
 async def cmd_start(message: types.Message):
     await message.answer(
         "<b>Привет! 👋</b>\n\n"
-        "Скачиваю видео и аудио из TikTok, Instagram Reels и VK клипов.\n\n"
+        "Скачиваю видео и аудио из TikTok и Instagram Reels.\n\n"
         "<b>Пришли ссылку</b> — выбери, что скачать!"
     )
 
@@ -51,7 +51,7 @@ async def cmd_start(message: types.Message):
 async def cmd_help(message: types.Message):
     await message.answer(
         "<b>Как пользоваться</b>\n\n"
-        "1. Пришли ссылку на видео/клип из TikTok, Instagram Reels или VK\n"
+        "1. Пришли ссылку на TikTok или Instagram Reels\n"
         "2. Выбери «Видео 🎥» или «Аудио 🎵»\n"
         "3. Жди — бот пришлёт файл\n\n"
         f"Лимит размера: {MAX_FILE_SIZE_MB} МБ\n"
@@ -97,9 +97,8 @@ async def handle_link(message: types.Message):
             info = ydl.extract_info(url, download=False)
 
             extractor = info.get("extractor_key", "").lower()
-            supported = ["tiktok", "instagram", "vk"]
-            if not any(s in extractor for s in supported):
-                await message.answer("Поддерживаю только TikTok, Instagram Reels и VK клипы. Попробуй другую ссылку.")
+            if "tiktok" not in extractor and "instagram" not in extractor:
+                await message.answer("Поддерживаю только TikTok и Instagram Reels. Попробуй другую ссылку.")
                 return
 
             title = info.get("title", "Без названия")
