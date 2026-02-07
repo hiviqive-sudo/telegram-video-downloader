@@ -35,11 +35,7 @@ user_requests = {}
 async def cmd_start(message: types.Message):
     await message.answer(
         "<b>Привет! 👋</b>\n\n"
-        "Скачиваю видео и аудио из:\n"
-        "• TikTok\n"
-        "• Instagram Reels\n"
-        "• YouTube (видео + Shorts — видео + аудио)\n"
-        "• VK Shorts/клипы\n\n"
+        "Скачиваю видео и аудио из VK клипов.\n\n"
         "<b>Пришли ссылку</b> — выбери, что скачать!"
     )
 
@@ -47,7 +43,7 @@ async def cmd_start(message: types.Message):
 async def cmd_help(message: types.Message):
     await message.answer(
         "<b>Как пользоваться</b>\n\n"
-        "1. Пришли ссылку из TikTok, Instagram Reels, YouTube или VK Shorts/клипов\n"
+        "1. Пришли ссылку на VK клип\n"
         "2. Выбери «Видео» или «Аудио»\n"
         "3. Жди — бот пришлёт файл\n\n"
         f"Лимит размера: {MAX_FILE_SIZE_MB} МБ\n"
@@ -93,6 +89,10 @@ async def handle_link(message: types.Message):
             info = ydl.extract_info(url, download=False)
 
             extractor = info.get("extractor_key", "").lower()
+            if "vk" not in extractor:
+                await message.answer("Поддерживаю только VK клипы. Попробуй другую ссылку.")
+                return
+
             title = info.get("title", "Без названия")
             uploader = info.get("uploader", "Автор неизвестен")
             duration = info.get("duration", 0)
@@ -151,7 +151,7 @@ async def process_callback(callback: types.CallbackQuery):
 
     try:
         if choice == "video":
-            format_str = "bestvideo+bestaudio/best"  # видео + аудио для YouTube Shorts
+            format_str = "best[ext=mp4]/best"  # готовый mp4 с аудио
         else:
             format_str = "bestaudio[ext=m4a]/bestaudio/best"
 
@@ -226,7 +226,5 @@ async def main():
     logger.info("Бот запущен")
     await dp.start_polling(bot)
 
-if __name__ == "__main__":
-    asyncio.run(main())
 if __name__ == "__main__":
     asyncio.run(main())
