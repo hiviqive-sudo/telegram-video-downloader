@@ -26,8 +26,11 @@ REQUEST_LIMIT_PER_MINUTE = int(os.getenv("REQUEST_LIMIT_PER_MINUTE", "5"))
 
 BOT_LINK = "https://t.me/myyvideodownloader_bot"  # ← username твоего бота
 
-# Список каналов, на которые нужно подписаться (замени на свои @username)
-REQUIRED_CHANNELS = ["@jgfdfdgdg", "https://t.me/+AfKNOoS0oz82MzJi"]  # ← здесь укажи свои каналы
+# Твои каналы (ID или @username — для приватных каналов используй ID)
+REQUIRED_CHANNELS = [
+    "@+AfKNOoS0oz82MzJi",  # https://t.me/+AfKNOoS0oz82MzJi
+    "@jgfdfdgdg"            # https://t.me/jgfdfdgdg
+]
 
 bot = Bot(token=API_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
@@ -116,6 +119,19 @@ async def handle_link(message: types.Message):
 
             bot.full_url = url
 
+            # Проверяем подписку сразу
+            if not await is_subscribed(user_id):
+                keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="Подписаться на каналы", url="https://t.me/+AfKNOoS0oz82MzJi")],
+                    [InlineKeyboardButton(text="Подписаться на второй канал", url="https://t.me/jgfdfdgdg")],
+                    [InlineKeyboardButton(text="Проверить подписку", callback_data="check_sub")]
+                ])
+                await message.answer(
+                    "Чтобы скачать, подпишись на каналы и нажми «Проверить подписку»!",
+                    reply_markup=keyboard
+                )
+                return
+
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
                 [
                     InlineKeyboardButton(text="Видео", callback_data="dl_video"),
@@ -163,21 +179,13 @@ async def process_callback(callback: types.CallbackQuery):
 
     if callback.data == "check_sub":
         if await is_subscribed(user_id):
-            await callback.message.edit_caption(
-                caption="Подписка проверена! Выбери, что скачать:",
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [
-                        InlineKeyboardButton(text="Видео", callback_data="dl_video"),
-                        InlineKeyboardButton(text="Аудио", callback_data="dl_audio")
-                    ],
-                    [
-                        InlineKeyboardButton(text="Назад", callback_data="back")
-                    ]
-                ])
+            await callback.message.edit_text(
+                "Подписка проверена! Теперь пришли ссылку снова, чтобы скачать."
             )
         else:
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="Подписаться на каналы", url="https://t.me/channel1")],  # ← замени на свои каналы
+                [InlineKeyboardButton(text="Подписаться на каналы", url="https://t.me/+AfKNOoS0oz82MzJi")],
+                [InlineKeyboardButton(text="Подписаться на второй канал", url="https://t.me/jgfdfdgdg")],
                 [InlineKeyboardButton(text="Проверить подписку", callback_data="check_sub")]
             ])
             await callback.message.edit_caption(
