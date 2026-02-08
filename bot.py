@@ -3,32 +3,13 @@ import logging
 import tempfile
 import os
 import time
-import sqlite3
+import asyncpg
 import yt_dlp
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import CommandStart, Command
 from aiogram.types import FSInputFile, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-import asyncpg
-
-# Глобальный пул подключения
-pool = None
-
-async def init_db():
-    global pool
-    pool = await asyncpg.create_pool(dsn=os.getenv("DATABASE_URL"))
-    async with pool.acquire() as conn:
-        await conn.execute('''
-        CREATE TABLE IF NOT EXISTS users (
-            user_id BIGINT PRIMARY KEY,
-            premium_until BIGINT DEFAULT 0,
-            ref_count INTEGER DEFAULT 0,
-            ref_id BIGINT,
-            total_downloads INTEGER DEFAULT 0,
-            last_active BIGINT
-        )
-        ''')
 
 logging.basicConfig(
     level=logging.INFO,
@@ -41,12 +22,13 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 API_TOKEN = os.getenv("API_TOKEN")
+DATABASE_URL = os.getenv("DATABASE_URL")  # ← из Railway PostgreSQL
 MAX_FILE_SIZE_MB = int(os.getenv("MAX_FILE_SIZE_MB", "120"))
 REQUEST_LIMIT_PER_MINUTE = int(os.getenv("REQUEST_LIMIT_PER_MINUTE", "5"))
 
 BOT_LINK = "https://t.me/myyvideodownloader_bot"  # ← username твоего бота
 
-# Реклама для бесплатных пользователей (замени на свой канал)
+# Реклама после скачивания (замени на свой канал)
 AD_TEXT = (
     "Спасибо за использование! ❤️\n"
     "Подпишись на мой основной канал для крутого контента:\n"
@@ -59,20 +41,23 @@ dp = Dispatcher()
 
 user_requests = {}
 
-# База данных (SQLite)
-conn = sqlite3.connect('users.db')
-cursor = conn.cursor()
-cursor.execute('''
-CREATE TABLE IF NOT EXISTS users (
-    user_id INTEGER PRIMARY KEY,
-    premium_until INTEGER DEFAULT 0,
-    ref_count INTEGER DEFAULT 0,
-    ref_id INTEGER,
-    total_downloads INTEGER DEFAULT 0,
-    last_active TIMESTAMP
-)
-''')
-conn.commit()
+# Глобальный пул подключения
+pool = None
+
+async def init_db():
+    global pool
+    pool = await asyncpg.create_pool(dsn=DATABASE_URL)
+    async with pool.acquire() as conn:
+        await conn.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            user_id BIGINT PRIMARY KEY,
+            premium_until BIGINT DEFAULT 0,
+            ref_count INTEGER DEFAULT 0,
+            ref_id BIGINT,
+            total_downloads INTEGER DEFAULT 0,
+            last_active BIGINT
+        )
+        ''')
 
 async def is_premium(user_id):
     async with pool.acquire() as conn:
@@ -113,23 +98,23 @@ async def cmd_start_ref(message: types.Message):
     if args and args.startswith("ref"):
         ref_id = int(args.replace("ref", ""))
         if ref_id != message.from_user.id:
-            increment_ref_count(ref_id)
-            add_premium_days(ref_id, 10)
+            await increment_ref_count(ref_id)
+            await add_premium_days(ref_id, 10)
             await bot.send_message(ref_id, "🎉 Твой друг перешёл по реферальной ссылке! Тебе +10 дней премиум!")
     await cmd_start(message)
 
 @dp.message(CommandStart())
 async def cmd_start(message: types.Message):
     user_id = message.from_user.id
-    cursor.execute('INSERT OR IGNORE INTO users (user_id) VALUES (?)', (user_id,))
-    conn.commit()
-        user_id = message.from_user.id
     async with pool.acquire() as conn:
         await conn.execute('INSERT INTO users (user_id) VALUES ($1) ON CONFLICT DO NOTHING', user_id)
 
-    ref_link = f"{BOT_LINK}?start=ref{user_id}"
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Личный кабинет 📊", callback_data="cabinet")],
+        [InlineKeyboardButton(text="Пригласить друга и получить бонус 🎁", callback_data="show_ref")]
+    ])
 
-    welcome_text = (
+    await message.answer(
         "✨ <b>Привет, легенда скачиваний! 👋</b> ✨\n\n"
         "Я твой личный помощник по видео и музыке 🔥\n"
         "Скачиваю всё самое крутое из:\n"
@@ -137,20 +122,15 @@ async def cmd_start(message: types.Message):
         "  • Instagram Reels 📱\n"
         "  • VK клипы 🎥\n\n"
         "<b>Просто пришли ссылку</b> — и я всё сделаю за секунды! 🚀\n\n"
-        "Выбирай качество и наслаждайся! 🌟"
+        "Выбирай качество и наслаждайся! 🌟",
+        reply_markup=keyboard,
+        disable_web_page_preview=True
     )
-
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Личный кабинет 📊", callback_data="cabinet")],
-        [InlineKeyboardButton(text="Пригласить друга и получить бонус 🎁", callback_data="show_ref")]
-    ])
-
-    await message.answer(welcome_text, reply_markup=keyboard, disable_web_page_preview=True)
 
 @dp.callback_query(lambda c: c.data == "cabinet")
 async def show_cabinet(callback: types.CallbackQuery):
     user_id = callback.from_user.id
-    premium_days, ref_count, total_downloads, last_active = get_user_stats(user_id)
+    premium_days, ref_count, total_downloads, last_active = await get_user_stats(user_id)
 
     premium_status = f"Премиум активен: <b>{premium_days} дней</b> 💎" if premium_days > 0 else "Премиум не активен 😔"
 
@@ -360,8 +340,11 @@ async def process_callback(callback: types.CallbackQuery):
             # Автоматическое удаление файла после отправки
             os.remove(filename)
 
-            # Реклама после скачивания (только для бесплатных)
+            # Счётчик скачиваний
             user_id = callback.from_user.id
+            increment_download_count(user_id)
+
+            # Реклама после скачивания (только для бесплатных)
             if not is_premium(user_id):
                 await callback.message.answer(AD_TEXT)
 
@@ -373,7 +356,6 @@ async def process_callback(callback: types.CallbackQuery):
 
 async def main():
     logger.info("Бот запущен")
-    await init_db()  # ← подключаемся к базе
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
