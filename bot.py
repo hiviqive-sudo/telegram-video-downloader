@@ -3,8 +3,9 @@ import logging
 import tempfile
 import os
 import time
+import sqlite3
 import yt_dlp
-from aiogram import Bot, Dispatcher, types, F
+from aiogram import Bot, Dispatcher, types
 from aiogram.filters import CommandStart, Command
 from aiogram.types import FSInputFile, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.client.default import DefaultBotProperties
@@ -24,38 +25,158 @@ API_TOKEN = os.getenv("API_TOKEN")
 MAX_FILE_SIZE_MB = int(os.getenv("MAX_FILE_SIZE_MB", "120"))
 REQUEST_LIMIT_PER_MINUTE = int(os.getenv("REQUEST_LIMIT_PER_MINUTE", "5"))
 
-BOT_LINK = "https://t.me/myyvideodownloader_bot"
+BOT_LINK = "https://t.me/myyvideodownloader_bot"  # ← username твоего бота
+
+# Реклама для бесплатных пользователей (замени на свой канал)
+AD_TEXT = (
+    "Спасибо за использование! ❤️\n"
+    "Подпишись на мой основной канал для крутого контента:\n"
+    "👉 @твой_канал\n"
+    "Ещё больше полезного — заходи!"
+)
 
 bot = Bot(token=API_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
 
 user_requests = {}
 
+# База данных (SQLite)
+conn = sqlite3.connect('users.db')
+cursor = conn.cursor()
+cursor.execute('''
+CREATE TABLE IF NOT EXISTS users (
+    user_id INTEGER PRIMARY KEY,
+    premium_until INTEGER DEFAULT 0,
+    ref_count INTEGER DEFAULT 0,
+    ref_id INTEGER,
+    total_downloads INTEGER DEFAULT 0,
+    last_active TIMESTAMP
+)
+''')
+conn.commit()
+
+def is_premium(user_id):
+    cursor.execute('SELECT premium_until FROM users WHERE user_id = ?', (user_id,))
+    row = cursor.fetchone()
+    if row:
+        return row[0] > time.time()
+    return False
+
+def add_premium_days(user_id, days):
+    current_until = 0
+    cursor.execute('SELECT premium_until FROM users WHERE user_id = ?', (user_id,))
+    row = cursor.fetchone()
+    if row:
+        current_until = row[0]
+    new_until = max(current_until, int(time.time())) + days * 86400
+    cursor.execute('UPDATE users SET premium_until = ? WHERE user_id = ?', (new_until, user_id))
+    conn.commit()
+
+def increment_ref_count(ref_id):
+    cursor.execute('UPDATE users SET ref_count = ref_count + 1 WHERE user_id = ?', (ref_id,))
+    conn.commit()
+
+def increment_download_count(user_id):
+    now = int(time.time())
+    cursor.execute('UPDATE users SET total_downloads = total_downloads + 1, last_active = ? WHERE user_id = ?', (now, user_id))
+    conn.commit()
+
+def get_user_stats(user_id):
+    cursor.execute('SELECT premium_until, ref_count, total_downloads, last_active FROM users WHERE user_id = ?', (user_id,))
+    row = cursor.fetchone()
+    if row:
+        premium_until, ref_count, total_downloads, last_active = row
+        premium_days = max(0, int((premium_until - time.time()) / 86400)) if premium_until else 0
+        last_active_str = time.strftime('%d.%m.%Y %H:%M', time.localtime(last_active)) if last_active else "Никогда"
+        return premium_days, ref_count, total_downloads, last_active_str
+    return 0, 0, 0, "Никогда"
+
+@dp.message(CommandStart(deep_link=True))
+async def cmd_start_ref(message: types.Message):
+    args = message.text.split(' ', 1)[1] if len(message.text.split(' ', 1)) > 1 else None
+    if args and args.startswith("ref"):
+        ref_id = int(args.replace("ref", ""))
+        if ref_id != message.from_user.id:
+            increment_ref_count(ref_id)
+            add_premium_days(ref_id, 10)
+            await bot.send_message(ref_id, "🎉 Твой друг перешёл по реферальной ссылке! Тебе +10 дней премиум!")
+    await cmd_start(message)
+
 @dp.message(CommandStart())
 async def cmd_start(message: types.Message):
-    await message.answer(
-        "<b>Привет! 👋</b>\n\n"
-        "Скачиваю видео и аудио из TikTok и Instagram Reels.\n\n"
-        "<b>Пришли ссылку</b> — выбери, что скачать!"
+    user_id = message.from_user.id
+    cursor.execute('INSERT OR IGNORE INTO users (user_id) VALUES (?)', (user_id,))
+    conn.commit()
+
+    ref_link = f"{BOT_LINK}?start=ref{user_id}"
+
+    welcome_text = (
+        "✨ <b>Привет, легенда скачиваний! 👋</b> ✨\n\n"
+        "Я твой личный помощник по видео и музыке 🔥\n"
+        "Скачиваю всё самое крутое из:\n"
+        "  • TikTok 🎬\n"
+        "  • Instagram Reels 📱\n"
+        "  • VK клипы 🎥\n\n"
+        "<b>Просто пришли ссылку</b> — и я всё сделаю за секунды! 🚀\n\n"
+        "Выбирай качество и наслаждайся! 🌟"
     )
 
-@dp.message(Command("help"))
-async def cmd_help(message: types.Message):
-    await message.answer(
-        "<b>Как пользоваться</b>\n\n"
-        "1. Пришли ссылку на видео/клип из TikTok или Instagram Reels\n"
-        "2. Выбери «Видео» или «Аудио»\n"
-        "3. Жди — бот пришлёт файл\n\n"
-        f"Лимит размера: {MAX_FILE_SIZE_MB} МБ\n"
-        "Если не скачивается — попробуй другую ссылку."
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Личный кабинет 📊", callback_data="cabinet")],
+        [InlineKeyboardButton(text="Пригласить друга и получить бонус 🎁", callback_data="show_ref")]
+    ])
+
+    await message.answer(welcome_text, reply_markup=keyboard, disable_web_page_preview=True)
+
+@dp.callback_query(lambda c: c.data == "cabinet")
+async def show_cabinet(callback: types.CallbackQuery):
+    user_id = callback.from_user.id
+    premium_days, ref_count, total_downloads, last_active = get_user_stats(user_id)
+
+    premium_status = f"Премиум активен: <b>{premium_days} дней</b> 💎" if premium_days > 0 else "Премиум не активен 😔"
+
+    cabinet_text = (
+        "📊 <b>Личный кабинет</b> 📊\n\n"
+        f"{premium_status}\n"
+        f"Всего скачиваний: <b>{total_downloads}</b>\n"
+        f"Приглашено друзей: <b>{ref_count}</b>\n"
+        f"Последняя активность: <b>{last_active}</b>\n\n"
+        "Приглашай друзей — +10 дней премиум за каждого! 🎉"
     )
 
-# Ловим только текстовые сообщения (ссылки)
-@dp.message(F.text)
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Скачать ещё", callback_data="download")],
+        [InlineKeyboardButton(text="Пригласить друга и получить бонус 🎁", callback_data="show_ref")],
+        [InlineKeyboardButton(text="Назад ⬅️", callback_data="back")]
+    ])
+
+    await callback.message.edit_text(cabinet_text, reply_markup=keyboard)
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data == "download")
+async def download_from_cabinet(callback: types.CallbackQuery):
+    await callback.message.edit_text("Пришли новую ссылку для скачивания!")
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data == "show_ref")
+async def show_ref(callback: types.CallbackQuery):
+    user_id = callback.from_user.id
+    ref_link = f"{BOT_LINK}?start=ref{user_id}"
+
+    ref_text = (
+        "Вот твоя уникальная реферальная ссылка! 📩\n"
+        f"<code>{ref_link}</code>\n\n"
+        "Нажми на ссылку выше → выбери «Скопировать»\n\n"
+        "Отправь её друзьям — как только они начнут пользоваться ботом, тебе +10 дней премиум 🎉\n\n"
+        "Чем больше друзей — тем дольше премиум! 💎"
+    )
+
+    await callback.message.answer(ref_text, disable_web_page_preview=True)
+    await callback.answer("Ссылка отправлена! Нажми на неё и скопируй 📋")
+
+@dp.message()
 async def handle_link(message: types.Message):
     url = message.text.strip()
-    logger.info(f"Получена ссылка от {message.from_user.id}: {url}")
-
     if not url.startswith(("http://", "https://")):
         await message.answer("Пришли ссылку на видео/клип.")
         return
@@ -92,8 +213,9 @@ async def handle_link(message: types.Message):
             info = ydl.extract_info(url, download=False)
 
             extractor = info.get("extractor_key", "").lower()
-            if "tiktok" not in extractor and "instagram" not in extractor:
-                await message.answer("Поддерживаю только TikTok и Instagram Reels. Попробуй другую ссылку.")
+            supported = ["tiktok", "instagram", "vk"]
+            if not any(s in extractor for s in supported):
+                await message.answer("Поддерживаю только TikTok, Instagram Reels и VK клипы. Попробуй другую ссылку.")
                 return
 
             title = info.get("title", "Без названия")
@@ -219,8 +341,10 @@ async def process_callback(callback: types.CallbackQuery):
             # Автоматическое удаление файла после отправки
             os.remove(filename)
 
-            # Реклама после скачивания
-            await callback.message.answer(AD_TEXT)
+            # Реклама после скачивания (только для бесплатных)
+            user_id = callback.from_user.id
+            if not is_premium(user_id):
+                await callback.message.answer(AD_TEXT)
 
     except Exception as e:
         logger.error(f"Ошибка скачивания {url} ({choice}): {str(e)}", exc_info=True)
