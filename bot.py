@@ -5,10 +5,10 @@ import os
 import time
 import yt_dlp
 from aiogram import Bot, Dispatcher, types
-from aiogram.filters import CommandStart, Command
+from aiogram.filters import CommandStart, Command, Text
 from aiogram.types import FSInputFile, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.client.default import DefaultBotProperties
-from aiogram.enums import ParseMode, ContentType
+from aiogram.enums import ParseMode
 
 logging.basicConfig(
     level=logging.INFO,
@@ -24,7 +24,7 @@ API_TOKEN = os.getenv("API_TOKEN")
 MAX_FILE_SIZE_MB = int(os.getenv("MAX_FILE_SIZE_MB", "120"))
 REQUEST_LIMIT_PER_MINUTE = int(os.getenv("REQUEST_LIMIT_PER_MINUTE", "5"))
 
-BOT_LINK = "https://t.me/myyvideodownloader_bot"
+BOT_LINK = "https://t.me/myyvideodownloader_bot"  # ← username твоего бота
 
 bot = Bot(token=API_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
@@ -50,7 +50,8 @@ async def cmd_help(message: types.Message):
         "Если не скачивается — попробуй другую ссылку."
     )
 
-@dp.message(content_types=ContentType.TEXT)
+# Ловим ТОЛЬКО текстовые сообщения (ссылки)
+@dp.message(Text())
 async def handle_link(message: types.Message):
     url = message.text.strip()
     logger.info(f"Получена ссылка от {message.from_user.id}: {url}")
