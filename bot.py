@@ -3,6 +3,8 @@ import logging
 import tempfile
 import os
 import time
+import random
+import sqlite3
 import yt_dlp
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import CommandStart, Command
@@ -34,16 +36,92 @@ AD_TEXT = (
     "Ещё больше полезного — заходи!"
 )
 
+# Мотивационные цитаты / шутки после скачивания
+MOTIVATION = [
+    "Ты сегодня молодец! Продолжай в том же духе 💪",
+    "Музыка — это жизнь, а ты её скачал! 🎶",
+    "Каждое видео — маленький шаг к хорошему настроению 😄",
+    "Не останавливайся — впереди ещё больше крутого контента!",
+    "Ты — легенда скачивания! 🏆",
+    "Шутка дня: Почему программисты путают Хэллоуин и Рождество? Потому что Oct 31 == Dec 25 😂"
+]
+
 bot = Bot(token=API_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
 
 user_requests = {}
 
+# База данных (SQLite)
+conn = sqlite3.connect('users.db')
+cursor = conn.cursor()
+cursor.execute('''
+CREATE TABLE IF NOT EXISTS users (
+    user_id INTEGER PRIMARY KEY,
+    premium_until INTEGER DEFAULT 0,  -- timestamp до которого премиум
+    last_notification INTEGER DEFAULT 0,  -- timestamp последнего уведомления о функциях
+    ref_count INTEGER DEFAULT 0,
+    ref_id INTEGER
+)
+''')
+conn.commit()
+
+def is_premium(user_id):
+    cursor.execute('SELECT premium_until FROM users WHERE user_id = ?', (user_id,))
+    row = cursor.fetchone()
+    if row:
+        return row[0] > time.time()
+    return False
+
+def add_premium_days(user_id, days):
+    new_until = int(time.time()) + days * 86400
+    cursor.execute('INSERT OR REPLACE INTO users (user_id, premium_until) VALUES (?, ?)', (user_id, new_until))
+    conn.commit()
+
+def increment_ref_count(ref_id):
+    cursor.execute('UPDATE users SET ref_count = ref_count + 1 WHERE user_id = ?', (ref_id,))
+    conn.commit()
+
+def get_ref_id(user_id):
+    cursor.execute('SELECT ref_id FROM users WHERE user_id = ?', (user_id,))
+    row = cursor.fetchone()
+    return row[0] if row else None
+
+def update_notification_time(user_id):
+    now = int(time.time())
+    cursor.execute('UPDATE users SET last_notification = ? WHERE user_id = ?', (now, user_id))
+    conn.commit()
+
+def should_send_notification(user_id):
+    cursor.execute('SELECT last_notification FROM users WHERE user_id = ?', (user_id,))
+    row = cursor.fetchone()
+    if row and row[0]:
+        return time.time() - row[0] > 7 * 86400  # 7 дней
+    return True
+
+@dp.message(CommandStart(deep_link=True))
+async def cmd_start_ref(message: types.Message):
+    user_id = message.from_user.id
+    ref_id = message.get_args()  # ref123456
+    if ref_id and ref_id.isdigit():
+        ref_id = int(ref_id)
+        if ref_id != user_id:
+            increment_ref_count(ref_id)
+            add_premium_days(ref_id, 10)  # +10 дней премиум
+            await message.answer("Спасибо за приглашение друга! Тебе +10 дней премиум 🎉")
+    await cmd_start(message)
+
 @dp.message(CommandStart())
 async def cmd_start(message: types.Message):
+    user_id = message.from_user.id
+    cursor.execute('INSERT OR IGNORE INTO users (user_id) VALUES (?)', (user_id,))
+    conn.commit()
+
+    ref_link = f"{BOT_LINK}?start=ref{user_id}"
     await message.answer(
         "<b>Привет! 👋</b>\n\n"
-        "Скачиваю видео и аудио из TikTok и Instagram Reels.\n\n"
+        f"Скачиваю видео и аудио из TikTok, Instagram Reels и VK клипов.\n\n"
+        f"<b>Твоя реферальная ссылка</b> (приглашай друзей — +10 дней премиум за каждого):\n"
+        f"{ref_link}\n\n"
         "<b>Пришли ссылку</b> — выбери, что скачать!"
     )
 
@@ -51,11 +129,10 @@ async def cmd_start(message: types.Message):
 async def cmd_help(message: types.Message):
     await message.answer(
         "<b>Как пользоваться</b>\n\n"
-        "1. Пришли ссылку на видео/клип из TikTok или Instagram Reels\n"
+        "1. Пришли ссылку на видео/клип\n"
         "2. Выбери «Видео 🎥» или «Аудио 🎵»\n"
         "3. Жди — бот пришлёт файл\n\n"
-        f"Лимит размера: {MAX_FILE_SIZE_MB} МБ\n"
-        "Если ошибка — попробуй другую ссылку."
+        "Приглашай друзей — +10 дней премиум за каждого!"
     )
 
 @dp.message()
@@ -97,8 +174,9 @@ async def handle_link(message: types.Message):
             info = ydl.extract_info(url, download=False)
 
             extractor = info.get("extractor_key", "").lower()
-            if "tiktok" not in extractor and "instagram" not in extractor:
-                await message.answer("Поддерживаю только TikTok и Instagram Reels. Попробуй другую ссылку.")
+            supported = ["tiktok", "instagram", "vk"]
+            if not any(s in extractor for s in supported):
+                await message.answer("Поддерживаю только TikTok, Instagram Reels и VK клипы. Попробуй другую ссылку.")
                 return
 
             title = info.get("title", "Без названия")
@@ -143,6 +221,8 @@ async def handle_link(message: types.Message):
 
 @dp.callback_query(lambda c: c.data in ["dl_video", "dl_audio", "back"])
 async def process_callback(callback: types.CallbackQuery):
+    user_id = callback.from_user.id
+
     if callback.data == "back":
         await callback.message.delete()
         await callback.message.answer("<b>Отменил выбор.</b>\n\nПришли новую ссылку или /start")
@@ -156,7 +236,7 @@ async def process_callback(callback: types.CallbackQuery):
 
     try:
         if choice == "video":
-            format_str = "best"  # готовый mp4 с аудио (самый стабильный)
+            format_str = "best[ext=mp4]/best"
         else:
             format_str = "bestaudio[ext=m4a]/bestaudio/best"
 
