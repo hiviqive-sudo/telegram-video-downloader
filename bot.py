@@ -41,7 +41,7 @@ dp = Dispatcher()
 
 user_requests = {}
 
-# Глобальный пул подключения
+# Глобальный пул подключения к базе
 pool = None
 
 async def init_db():
@@ -59,6 +59,7 @@ async def init_db():
         )
         ''')
 
+# Функции для работы с базой
 async def is_premium(user_id):
     async with pool.acquire() as conn:
         row = await conn.fetchrow('SELECT premium_until FROM users WHERE user_id = $1', user_id)
@@ -109,12 +110,9 @@ async def cmd_start(message: types.Message):
     async with pool.acquire() as conn:
         await conn.execute('INSERT INTO users (user_id) VALUES ($1) ON CONFLICT DO NOTHING', user_id)
 
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Личный кабинет 📊", callback_data="cabinet")],
-        [InlineKeyboardButton(text="Пригласить друга и получить бонус 🎁", callback_data="show_ref")]
-    ])
+    ref_link = f"{BOT_LINK}?start=ref{user_id}"
 
-    await message.answer(
+    welcome_text = (
         "✨ <b>Привет, легенда скачиваний! 👋</b> ✨\n\n"
         "Я твой личный помощник по видео и музыке 🔥\n"
         "Скачиваю всё самое крутое из:\n"
@@ -122,10 +120,15 @@ async def cmd_start(message: types.Message):
         "  • Instagram Reels 📱\n"
         "  • VK клипы 🎥\n\n"
         "<b>Просто пришли ссылку</b> — и я всё сделаю за секунды! 🚀\n\n"
-        "Выбирай качество и наслаждайся! 🌟",
-        reply_markup=keyboard,
-        disable_web_page_preview=True
+        "Выбирай качество и наслаждайся! 🌟"
     )
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Личный кабинет 📊", callback_data="cabinet")],
+        [InlineKeyboardButton(text="Пригласить друга и получить бонус 🎁", callback_data="show_ref")]
+    ])
+
+    await message.answer(welcome_text, reply_markup=keyboard, disable_web_page_preview=True)
 
 @dp.callback_query(lambda c: c.data == "cabinet")
 async def show_cabinet(callback: types.CallbackQuery):
@@ -342,10 +345,10 @@ async def process_callback(callback: types.CallbackQuery):
 
             # Счётчик скачиваний
             user_id = callback.from_user.id
-            increment_download_count(user_id)
+            await increment_download_count(user_id)
 
             # Реклама после скачивания (только для бесплатных)
-            if not is_premium(user_id):
+            if not await is_premium(user_id):
                 await callback.message.answer(AD_TEXT)
 
     except Exception as e:
@@ -356,6 +359,7 @@ async def process_callback(callback: types.CallbackQuery):
 
 async def main():
     logger.info("Бот запущен")
+    await init_db()  # ← подключаемся к базе
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
