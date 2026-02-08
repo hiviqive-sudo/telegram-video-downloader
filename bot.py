@@ -3,7 +3,6 @@ import logging
 import tempfile
 import os
 import time
-import sqlite3
 import yt_dlp
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import CommandStart, Command
@@ -27,65 +26,14 @@ REQUEST_LIMIT_PER_MINUTE = int(os.getenv("REQUEST_LIMIT_PER_MINUTE", "5"))
 
 BOT_LINK = "https://t.me/myyvideodownloader_bot"  # ← username твоего бота
 
-# Реклама для бесплатных пользователей (замени на свой канал)
-AD_TEXT = (
-    "Спасибо за использование! ❤️\n"
-    "Подпишись на мой основной канал для крутого контента:\n"
-    "👉 @твой_канал\n"
-    "Ещё больше полезного — заходи!"
-)
-
 bot = Bot(token=API_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
 
 user_requests = {}
 
-# База данных (SQLite)
-conn = sqlite3.connect('users.db')
-cursor = conn.cursor()
-cursor.execute('''
-CREATE TABLE IF NOT EXISTS users (
-    user_id INTEGER PRIMARY KEY,
-    premium_until INTEGER DEFAULT 0,  -- timestamp до которого премиум
-    ref_count INTEGER DEFAULT 0,
-    ref_id INTEGER
-)
-''')
-conn.commit()
-
-def is_premium(user_id):
-    cursor.execute('SELECT premium_until FROM users WHERE user_id = ?', (user_id,))
-    row = cursor.fetchone()
-    if row:
-        return row[0] > time.time()
-    return False
-
-def add_premium_days(user_id, days):
-    new_until = int(time.time()) + days * 86400
-    cursor.execute('UPDATE users SET premium_until = ? WHERE user_id = ?', (new_until, user_id))
-    conn.commit()
-
-def increment_ref_count(ref_id):
-    cursor.execute('UPDATE users SET ref_count = ref_count + 1 WHERE user_id = ?', (ref_id,))
-    conn.commit()
-
-@dp.message(CommandStart(deep_link=True))
-async def cmd_start_ref(message: types.Message):
-    args = message.get_args()
-    if args:
-        ref_id = int(args.replace("ref", ""))
-        if ref_id != message.from_user.id:
-            increment_ref_count(ref_id)
-            add_premium_days(ref_id, 10)  # +10 дней премиум за друга
-            await message.answer("Спасибо за приглашение друга! Тебе +10 дней премиум 🎉")
-    await cmd_start(message)
-
 @dp.message(CommandStart())
 async def cmd_start(message: types.Message):
     user_id = message.from_user.id
-    cursor.execute('INSERT OR IGNORE INTO users (user_id) VALUES (?)', (user_id,))
-    conn.commit()
-
     ref_link = f"{BOT_LINK}?start=ref{user_id}"
 
     # Красивый приветственный текст
@@ -97,7 +45,9 @@ async def cmd_start(message: types.Message):
         "  • Instagram Reels 📱\n"
         "  • VK клипы 🎥\n\n"
         "<b>Просто пришли ссылку</b> — и я всё сделаю за секунды! 🚀\n\n"
-        "Приглашай друзей и получай бонусы ↓"
+        "Приглашай друзей и получай бонусы ↓\n\n"
+        "Твоя реферальная ссылка (приглашай друзей — +10 дней премиум за каждого):\n"
+        f"<code>{ref_link}</code>"
     )
 
     # Кнопки
