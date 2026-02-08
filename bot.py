@@ -48,17 +48,32 @@ CREATE TABLE IF NOT EXISTS users (
     user_id INTEGER PRIMARY KEY,
     premium_until INTEGER DEFAULT 0,  -- timestamp до которого премиум
     ref_count INTEGER DEFAULT 0,
-    ref_id INTEGER
+    ref_id INTEGER,
+    total_downloads INTEGER DEFAULT 0,
+    last_active TIMESTAMP
 )
 ''')
 conn.commit()
 
-def is_premium(user_id):
-    cursor.execute('SELECT premium_until FROM users WHERE user_id = ?', (user_id,))
+def update_user_activity(user_id):
+    now = int(time.time())
+    cursor.execute('UPDATE users SET last_active = ? WHERE user_id = ?', (now, user_id))
+    conn.commit()
+
+def increment_download_count(user_id):
+    cursor.execute('UPDATE users SET total_downloads = total_downloads + 1 WHERE user_id = ?', (user_id,))
+    conn.commit()
+    update_user_activity(user_id)
+
+def get_user_stats(user_id):
+    cursor.execute('SELECT premium_until, ref_count, total_downloads, last_active FROM users WHERE user_id = ?', (user_id,))
     row = cursor.fetchone()
     if row:
-        return row[0] > time.time()
-    return False
+        premium_until, ref_count, total_downloads, last_active = row
+        premium_days = max(0, int((premium_until - time.time()) / 86400)) if premium_until else 0
+        last_active_str = time.strftime('%d.%m.%Y %H:%M', time.localtime(last_active)) if last_active else "Никогда"
+        return premium_days, ref_count, total_downloads, last_active_str
+    return 0, 0, 0, "Никогда"
 
 def add_premium_days(user_id, days):
     current_until = 0
@@ -82,7 +97,8 @@ async def cmd_start_ref(message: types.Message):
         if ref_id != message.from_user.id:
             increment_ref_count(ref_id)
             add_premium_days(ref_id, 10)  # +10 дней премиум пригласившему
-            await message.answer("Спасибо за приглашение друга! Пригласившему +10 дней премиум 🎉")
+            # Уведомление приходит ТОЛЬКО пригласившему
+            await bot.send_message(ref_id, "🎉 Твой друг перешёл по реферальной ссылке! Тебе +10 дней премиум!")
     await cmd_start(message)
 
 @dp.message(CommandStart())
@@ -93,7 +109,6 @@ async def cmd_start(message: types.Message):
 
     ref_link = f"{BOT_LINK}?start=ref{user_id}"
 
-    # Красивый приветственный текст
     welcome_text = (
         "✨ <b>Привет, легенда скачиваний! 👋</b> ✨\n\n"
         "Я твой личный помощник по видео и музыке 🔥\n"
@@ -102,12 +117,12 @@ async def cmd_start(message: types.Message):
         "  • Instagram Reels 📱\n"
         "  • VK клипы 🎥\n\n"
         "<b>Просто пришли ссылку</b> — и я всё сделаю за секунды! 🚀\n\n"
-        "Выбирай качество и наслаждайся!"
+        "Выбирай качество и наслаждайся! 🌟"
     )
 
-    # Кнопки
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="Пригласить друга и получить бонус 🎁", callback_data="show_ref")],
+        [InlineKeyboardButton(text="Личный кабинет", callback_data="cabinet")],
         [InlineKeyboardButton(text="Как это работает? ❓", callback_data="help_ref")]
     ])
 
@@ -121,12 +136,41 @@ async def show_ref(callback: types.CallbackQuery):
     ref_text = (
         "Вот твоя уникальная реферальная ссылка! 📩\n"
         f"<code>{ref_link}</code>\n\n"
+        "Нажми на ссылку выше → выбери «Скопировать»\n\n"
         "Отправь её друзьям — как только они начнут пользоваться ботом, тебе +10 дней премиум 🎉\n\n"
         "Чем больше друзей — тем дольше премиум! 💎"
     )
 
     await callback.message.answer(ref_text, disable_web_page_preview=True)
     await callback.answer("Ссылка отправлена! Нажми на неё и скопируй 📋")
+
+@dp.callback_query(lambda c: c.data == "cabinet")
+async def show_cabinet(callback: types.CallbackQuery):
+    user_id = callback.from_user.id
+    premium_days, ref_count, total_downloads, last_active = get_user_stats(user_id)
+
+    cabinet_text = (
+        "📊 <b>Личный кабинет</b> 📊\n\n"
+        f"Всего скачиваний: <b>{total_downloads}</b>\n"
+        f"Дней премиум осталось: <b>{premium_days}</b>\n"
+        f"Приглашено друзей: <b>{ref_count}</b>\n"
+        f"Последняя активность: <b>{last_active}</b>\n\n"
+        "Приглашай друзей и получай +10 дней премиум за каждого! 🎉"
+    )
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Скачать ещё", callback_data="download")],
+        [InlineKeyboardButton(text="Пригласить друга и получить бонус 🎁", callback_data="show_ref")],
+        [InlineKeyboardButton(text="Назад ⬅️", callback_data="back")]
+    ])
+
+    await callback.message.edit_text(cabinet_text, reply_markup=keyboard)
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data == "download")
+async def download_from_cabinet(callback: types.CallbackQuery):
+    await callback.message.edit_text("Пришли новую ссылку для скачивания!")
+    await callback.answer()
 
 @dp.callback_query(lambda c: c.data == "help_ref")
 async def help_ref(callback: types.CallbackQuery):
