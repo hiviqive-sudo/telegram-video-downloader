@@ -26,11 +26,11 @@ REQUEST_LIMIT_PER_MINUTE = int(os.getenv("REQUEST_LIMIT_PER_MINUTE", "5"))
 
 BOT_LINK = "https://t.me/myyvideodownloader_bot"  # ← username твоего бота
 
-# Реклама после скачивания (замени на свой канал)
+# Реклама после скачивания (замени на свой текст)
 AD_TEXT = (
     "Спасибо за использование! ❤️\n"
     "Подпишись на мой основной канал для крутого контента:\n"
-    "👉 @infopull_official\n"
+    "👉 @твой_канал\n"
     "Ещё больше полезного — заходи!"
 )
 
@@ -38,6 +38,14 @@ bot = Bot(token=API_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTM
 dp = Dispatcher()
 
 user_requests = {}
+
+# Прогресс-хук
+def progress_hook(d, progress_msg: types.Message):
+    if d['status'] == 'downloading':
+        percent = d.get('_percent_str', '0%')
+        asyncio.create_task(progress_msg.edit_caption(caption=f"Скачиваю... {percent}"))
+    elif d['status'] == 'finished':
+        asyncio.create_task(progress_msg.edit_caption(caption="Готово! Отправляю файл... ⏳"))
 
 @dp.message(CommandStart())
 async def cmd_start(message: types.Message):
@@ -51,11 +59,11 @@ async def cmd_start(message: types.Message):
 async def cmd_help(message: types.Message):
     await message.answer(
         "<b>Как пользоваться</b>\n\n"
-        "1. Пришли ссылку на TikTok или Instagram Reels\n"
-        "2. Выбери «Видео 🎥» или «Аудио 🎵»\n"
+        "1. Пришли ссылку на видео/клип из TikTok или Instagram Reels\n"
+        "2. Выбери «Видео» или «Аудио»\n"
         "3. Жди — бот пришлёт файл\n\n"
         f"Лимит размера: {MAX_FILE_SIZE_MB} МБ\n"
-        "Если ошибка — попробуй другую ссылку."
+        "Если не скачивается — попробуй другую ссылку."
     )
 
 @dp.message()
