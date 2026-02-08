@@ -10,6 +10,25 @@ from aiogram.filters import CommandStart, Command
 from aiogram.types import FSInputFile, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
+import asyncpg
+
+# Глобальный пул подключения
+pool = None
+
+async def init_db():
+    global pool
+    pool = await asyncpg.create_pool(dsn=os.getenv("DATABASE_URL"))
+    async with pool.acquire() as conn:
+        await conn.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            user_id BIGINT PRIMARY KEY,
+            premium_until BIGINT DEFAULT 0,
+            ref_count INTEGER DEFAULT 0,
+            ref_id BIGINT,
+            total_downloads INTEGER DEFAULT 0,
+            last_active BIGINT
+        )
+        ''')
 
 logging.basicConfig(
     level=logging.INFO,
@@ -55,41 +74,38 @@ CREATE TABLE IF NOT EXISTS users (
 ''')
 conn.commit()
 
-def is_premium(user_id):
-    cursor.execute('SELECT premium_until FROM users WHERE user_id = ?', (user_id,))
-    row = cursor.fetchone()
-    if row:
-        return row[0] > time.time()
-    return False
+async def is_premium(user_id):
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow('SELECT premium_until FROM users WHERE user_id = $1', user_id)
+        if row:
+            return row['premium_until'] > time.time()
+        return False
 
-def add_premium_days(user_id, days):
-    current_until = 0
-    cursor.execute('SELECT premium_until FROM users WHERE user_id = ?', (user_id,))
-    row = cursor.fetchone()
-    if row:
-        current_until = row[0]
-    new_until = max(current_until, int(time.time())) + days * 86400
-    cursor.execute('UPDATE users SET premium_until = ? WHERE user_id = ?', (new_until, user_id))
-    conn.commit()
+async def add_premium_days(user_id, days):
+    async with pool.acquire() as conn:
+        current = await conn.fetchval('SELECT premium_until FROM users WHERE user_id = $1', user_id)
+        current = current or 0
+        new_until = max(current, int(time.time())) + days * 86400
+        await conn.execute('INSERT INTO users (user_id, premium_until) VALUES ($1, $2) ON CONFLICT (user_id) DO UPDATE SET premium_until = $2', user_id, new_until)
 
-def increment_ref_count(ref_id):
-    cursor.execute('UPDATE users SET ref_count = ref_count + 1 WHERE user_id = ?', (ref_id,))
-    conn.commit()
+async def increment_ref_count(ref_id):
+    async with pool.acquire() as conn:
+        await conn.execute('UPDATE users SET ref_count = ref_count + 1 WHERE user_id = $1', ref_id)
 
-def increment_download_count(user_id):
+async def increment_download_count(user_id):
     now = int(time.time())
-    cursor.execute('UPDATE users SET total_downloads = total_downloads + 1, last_active = ? WHERE user_id = ?', (now, user_id))
-    conn.commit()
+    async with pool.acquire() as conn:
+        await conn.execute('UPDATE users SET total_downloads = total_downloads + 1, last_active = $1 WHERE user_id = $2', now, user_id)
 
-def get_user_stats(user_id):
-    cursor.execute('SELECT premium_until, ref_count, total_downloads, last_active FROM users WHERE user_id = ?', (user_id,))
-    row = cursor.fetchone()
-    if row:
-        premium_until, ref_count, total_downloads, last_active = row
-        premium_days = max(0, int((premium_until - time.time()) / 86400)) if premium_until else 0
-        last_active_str = time.strftime('%d.%m.%Y %H:%M', time.localtime(last_active)) if last_active else "Никогда"
-        return premium_days, ref_count, total_downloads, last_active_str
-    return 0, 0, 0, "Никогда"
+async def get_user_stats(user_id):
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow('SELECT premium_until, ref_count, total_downloads, last_active FROM users WHERE user_id = $1', user_id)
+        if row:
+            premium_until, ref_count, total_downloads, last_active = row
+            premium_days = max(0, int((premium_until - time.time()) / 86400)) if premium_until else 0
+            last_active_str = time.strftime('%d.%m.%Y %H:%M', time.localtime(last_active)) if last_active else "Никогда"
+            return premium_days, ref_count, total_downloads, last_active_str
+        return 0, 0, 0, "Никогда"
 
 @dp.message(CommandStart(deep_link=True))
 async def cmd_start_ref(message: types.Message):
@@ -107,6 +123,9 @@ async def cmd_start(message: types.Message):
     user_id = message.from_user.id
     cursor.execute('INSERT OR IGNORE INTO users (user_id) VALUES (?)', (user_id,))
     conn.commit()
+        user_id = message.from_user.id
+    async with pool.acquire() as conn:
+        await conn.execute('INSERT INTO users (user_id) VALUES ($1) ON CONFLICT DO NOTHING', user_id)
 
     ref_link = f"{BOT_LINK}?start=ref{user_id}"
 
@@ -354,6 +373,7 @@ async def process_callback(callback: types.CallbackQuery):
 
 async def main():
     logger.info("Бот запущен")
+    await init_db()  # ← подключаемся к базе
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
