@@ -46,7 +46,7 @@ cursor = conn.cursor()
 cursor.execute('''
 CREATE TABLE IF NOT EXISTS users (
     user_id INTEGER PRIMARY KEY,
-    premium_until INTEGER DEFAULT 0,  -- timestamp до которого премиум
+    premium_until INTEGER DEFAULT 0,
     ref_count INTEGER DEFAULT 0,
     ref_id INTEGER,
     total_downloads INTEGER DEFAULT 0,
@@ -55,25 +55,12 @@ CREATE TABLE IF NOT EXISTS users (
 ''')
 conn.commit()
 
-def update_user_activity(user_id):
-    now = int(time.time())
-    cursor.execute('UPDATE users SET last_active = ? WHERE user_id = ?', (now, user_id))
-    conn.commit()
-
-def increment_download_count(user_id):
-    cursor.execute('UPDATE users SET total_downloads = total_downloads + 1 WHERE user_id = ?', (user_id,))
-    conn.commit()
-    update_user_activity(user_id)
-
-def get_user_stats(user_id):
-    cursor.execute('SELECT premium_until, ref_count, total_downloads, last_active FROM users WHERE user_id = ?', (user_id,))
+def is_premium(user_id):
+    cursor.execute('SELECT premium_until FROM users WHERE user_id = ?', (user_id,))
     row = cursor.fetchone()
     if row:
-        premium_until, ref_count, total_downloads, last_active = row
-        premium_days = max(0, int((premium_until - time.time()) / 86400)) if premium_until else 0
-        last_active_str = time.strftime('%d.%m.%Y %H:%M', time.localtime(last_active)) if last_active else "Никогда"
-        return premium_days, ref_count, total_downloads, last_active_str
-    return 0, 0, 0, "Никогда"
+        return row[0] > time.time()
+    return False
 
 def add_premium_days(user_id, days):
     current_until = 0
@@ -89,6 +76,21 @@ def increment_ref_count(ref_id):
     cursor.execute('UPDATE users SET ref_count = ref_count + 1 WHERE user_id = ?', (ref_id,))
     conn.commit()
 
+def increment_download_count(user_id):
+    now = int(time.time())
+    cursor.execute('UPDATE users SET total_downloads = total_downloads + 1, last_active = ? WHERE user_id = ?', (now, user_id))
+    conn.commit()
+
+def get_user_stats(user_id):
+    cursor.execute('SELECT premium_until, ref_count, total_downloads, last_active FROM users WHERE user_id = ?', (user_id,))
+    row = cursor.fetchone()
+    if row:
+        premium_until, ref_count, total_downloads, last_active = row
+        premium_days = max(0, int((premium_until - time.time()) / 86400)) if premium_until else 0
+        last_active_str = time.strftime('%d.%m.%Y %H:%M', time.localtime(last_active)) if last_active else "Никогда"
+        return premium_days, ref_count, total_downloads, last_active_str
+    return 0, 0, 0, "Никогда"
+
 @dp.message(CommandStart(deep_link=True))
 async def cmd_start_ref(message: types.Message):
     args = message.text.split(' ', 1)[1] if len(message.text.split(' ', 1)) > 1 else None
@@ -96,8 +98,8 @@ async def cmd_start_ref(message: types.Message):
         ref_id = int(args.replace("ref", ""))
         if ref_id != message.from_user.id:
             increment_ref_count(ref_id)
-            add_premium_days(ref_id, 10)  # +10 дней премиум пригласившему
-            # Уведомление приходит ТОЛЬКО пригласившему
+            add_premium_days(ref_id, 10)
+            # Уведомление ТОЛЬКО пригласившему
             await bot.send_message(ref_id, "🎉 Твой друг перешёл по реферальной ссылке! Тебе +10 дней премиум!")
     await cmd_start(message)
 
@@ -107,9 +109,12 @@ async def cmd_start(message: types.Message):
     cursor.execute('INSERT OR IGNORE INTO users (user_id) VALUES (?)', (user_id,))
     conn.commit()
 
-    ref_link = f"{BOT_LINK}?start=ref{user_id}"
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Личный кабинет 📊", callback_data="cabinet")],
+        [InlineKeyboardButton(text="Пригласить друга и получить бонус 🎁", callback_data="show_ref")]
+    ])
 
-    welcome_text = (
+    await message.answer(
         "✨ <b>Привет, легенда скачиваний! 👋</b> ✨\n\n"
         "Я твой личный помощник по видео и музыке 🔥\n"
         "Скачиваю всё самое крутое из:\n"
@@ -117,45 +122,25 @@ async def cmd_start(message: types.Message):
         "  • Instagram Reels 📱\n"
         "  • VK клипы 🎥\n\n"
         "<b>Просто пришли ссылку</b> — и я всё сделаю за секунды! 🚀\n\n"
-        "Выбирай качество и наслаждайся! 🌟"
+        "Выбирай качество и наслаждайся! 🌟",
+        reply_markup=keyboard,
+        disable_web_page_preview=True
     )
-
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Пригласить друга и получить бонус 🎁", callback_data="show_ref")],
-        [InlineKeyboardButton(text="Личный кабинет", callback_data="cabinet")],
-        [InlineKeyboardButton(text="Как это работает? ❓", callback_data="help_ref")]
-    ])
-
-    await message.answer(welcome_text, reply_markup=keyboard, disable_web_page_preview=True)
-
-@dp.callback_query(lambda c: c.data == "show_ref")
-async def show_ref(callback: types.CallbackQuery):
-    user_id = callback.from_user.id
-    ref_link = f"{BOT_LINK}?start=ref{user_id}"
-
-    ref_text = (
-        "Вот твоя уникальная реферальная ссылка! 📩\n"
-        f"<code>{ref_link}</code>\n\n"
-        "Нажми на ссылку выше → выбери «Скопировать»\n\n"
-        "Отправь её друзьям — как только они начнут пользоваться ботом, тебе +10 дней премиум 🎉\n\n"
-        "Чем больше друзей — тем дольше премиум! 💎"
-    )
-
-    await callback.message.answer(ref_text, disable_web_page_preview=True)
-    await callback.answer("Ссылка отправлена! Нажми на неё и скопируй 📋")
 
 @dp.callback_query(lambda c: c.data == "cabinet")
 async def show_cabinet(callback: types.CallbackQuery):
     user_id = callback.from_user.id
     premium_days, ref_count, total_downloads, last_active = get_user_stats(user_id)
 
+    premium_status = f"Премиум активен: <b>{premium_days} дней</b> 💎" if premium_days > 0 else "Премиум не активен 😔"
+
     cabinet_text = (
         "📊 <b>Личный кабинет</b> 📊\n\n"
+        f"{premium_status}\n"
         f"Всего скачиваний: <b>{total_downloads}</b>\n"
-        f"Дней премиум осталось: <b>{premium_days}</b>\n"
         f"Приглашено друзей: <b>{ref_count}</b>\n"
         f"Последняя активность: <b>{last_active}</b>\n\n"
-        "Приглашай друзей и получай +10 дней премиум за каждого! 🎉"
+        "Приглашай друзей — +10 дней премиум за каждого! 🎉"
     )
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
@@ -172,17 +157,21 @@ async def download_from_cabinet(callback: types.CallbackQuery):
     await callback.message.edit_text("Пришли новую ссылку для скачивания!")
     await callback.answer()
 
-@dp.callback_query(lambda c: c.data == "help_ref")
-async def help_ref(callback: types.CallbackQuery):
-    await callback.message.answer(
-        "Как работает рефералка:\n\n"
-        "1. Нажми кнопку «Пригласить друга и получить бонус»\n"
-        "2. Бот отправит твою уникальную ссылку\n"
-        "3. Отправь её друзьям\n"
-        "4. Как только друг начнёт пользоваться ботом — тебе +10 дней премиум! 🎉\n\n"
-        "Просто и выгодно 😎"
+@dp.callback_query(lambda c: c.data == "show_ref")
+async def show_ref(callback: types.CallbackQuery):
+    user_id = callback.from_user.id
+    ref_link = f"{BOT_LINK}?start=ref{user_id}"
+
+    ref_text = (
+        "Вот твоя уникальная реферальная ссылка! 📩\n"
+        f"<code>{ref_link}</code>\n\n"
+        "Нажми на ссылку выше → выбери «Скопировать»\n\n"
+        "Отправь её друзьям — как только они начнут пользоваться ботом, тебе +10 дней премиум 🎉\n\n"
+        "Чем больше друзей — тем дольше премиум! 💎"
     )
-    await callback.answer()
+
+    await callback.message.answer(ref_text, disable_web_page_preview=True)
+    await callback.answer("Ссылка отправлена! Нажми на неё и скопируй 📋")
 
 @dp.message()
 async def handle_link(message: types.Message):
@@ -351,8 +340,13 @@ async def process_callback(callback: types.CallbackQuery):
             # Автоматическое удаление файла после отправки
             os.remove(filename)
 
-            # Реклама после скачивания
-            await callback.message.answer(AD_TEXT)
+            # Счётчик скачиваний
+            user_id = callback.from_user.id
+            increment_download_count(user_id)
+
+            # Реклама после скачивания (только для бесплатных)
+            if not is_premium(user_id):
+                await callback.message.answer(AD_TEXT)
 
     except Exception as e:
         logger.error(f"Ошибка скачивания {url} ({choice}): {str(e)}", exc_info=True)
