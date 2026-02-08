@@ -26,6 +26,14 @@ REQUEST_LIMIT_PER_MINUTE = int(os.getenv("REQUEST_LIMIT_PER_MINUTE", "5"))
 
 BOT_LINK = "https://t.me/myyvideodownloader_bot"  # ← username твоего бота
 
+# Реклама после скачивания (замени на свой канал)
+AD_TEXT = (
+    "Спасибо за использование! ❤️\n"
+    "Подпишись на мой основной канал для крутого контента:\n"
+    "👉 @твой_канал\n"
+    "Ещё больше полезного — заходи!"
+)
+
 bot = Bot(token=API_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
 
@@ -36,7 +44,7 @@ async def cmd_start(message: types.Message):
     user_id = message.from_user.id
     ref_link = f"{BOT_LINK}?start=ref{user_id}"
 
-    # Красивый приветственный текст
+    # Красивый приветственный текст (без рефералки)
     welcome_text = (
         "✨ <b>Привет, легенда скачиваний! 👋</b> ✨\n\n"
         "Я твой личный помощник по видео и музыке 🔥\n"
@@ -45,27 +53,41 @@ async def cmd_start(message: types.Message):
         "  • Instagram Reels 📱\n"
         "  • VK клипы 🎥\n\n"
         "<b>Просто пришли ссылку</b> — и я всё сделаю за секунды! 🚀\n\n"
-        "Приглашай друзей и получай бонусы ↓\n\n"
-        "Твоя реферальная ссылка (приглашай друзей — +10 дней премиум за каждого):\n"
-        f"<code>{ref_link}</code>"
+        "Выбирай качество и наслаждайся!"
     )
 
     # Кнопки
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Скопировать реферальную ссылку 📋", url=ref_link)],
+        [InlineKeyboardButton(text="Пригласить друга и получить бонус 🎁", callback_data="show_ref")],
         [InlineKeyboardButton(text="Как это работает? ❓", callback_data="help_ref")]
     ])
 
     await message.answer(welcome_text, reply_markup=keyboard, disable_web_page_preview=True)
 
+@dp.callback_query(lambda c: c.data == "show_ref")
+async def show_ref(callback: types.CallbackQuery):
+    user_id = callback.from_user.id
+    ref_link = f"{BOT_LINK}?start=ref{user_id}"
+
+    ref_text = (
+        "Вот твоя уникальная реферальная ссылка! 📩\n"
+        f"<code>{ref_link}</code>\n\n"
+        "Отправь её друзьям — как только они начнут пользоваться ботом, тебе +10 дней премиум 🎉\n\n"
+        "Чем больше друзей — тем дольше премиум! 💎"
+    )
+
+    await callback.message.answer(ref_text, disable_web_page_preview=True)
+    await callback.answer("Ссылка отправлена! Нажми на неё и скопируй 📋")
+
 @dp.callback_query(lambda c: c.data == "help_ref")
 async def help_ref(callback: types.CallbackQuery):
     await callback.message.answer(
         "Как работает рефералка:\n\n"
-        "1. Нажми на кнопку «Скопировать реферальную ссылку»\n"
-        "2. Отправь её друзьям\n"
-        "3. Как только друг начнёт пользоваться ботом — тебе +10 дней премиум! 🎉\n\n"
-        "Чем больше друзей — тем дольше премиум 💎"
+        "1. Нажми кнопку «Пригласить друга и получить бонус»\n"
+        "2. Бот отправит твою уникальную ссылку\n"
+        "3. Отправь её друзьям\n"
+        "4. Как только друг начнёт пользоваться ботом — тебе +10 дней премиум! 🎉\n\n"
+        "Просто и выгодно 😎"
     )
     await callback.answer()
 
