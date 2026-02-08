@@ -26,14 +26,13 @@ DATABASE_URL = os.getenv("DATABASE_URL")  # ← из Railway PostgreSQL
 MAX_FILE_SIZE_MB = int(os.getenv("MAX_FILE_SIZE_MB", "120"))
 REQUEST_LIMIT_PER_MINUTE = int(os.getenv("REQUEST_LIMIT_PER_MINUTE", "5"))
 
-BOT_LINK = "https://t.me/myyvideodownloader_bot"  # ← username твоего бота
+BOT_LINK = "https://t.me/myyvideodownloader_bot"
 
-# Реклама после скачивания (замени на свой канал)
+# Реклама (замени на свой)
 AD_TEXT = (
     "Спасибо за использование! ❤️\n"
-    "Подпишись на мой основной канал для крутого контента:\n"
-    "👉 @твой_канал\n"
-    "Ещё больше полезного — заходи!"
+    "Подпишись на мой канал:\n"
+    "👉 @твой_канал"
 )
 
 bot = Bot(token=API_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
@@ -41,7 +40,7 @@ dp = Dispatcher()
 
 user_requests = {}
 
-# Глобальный пул подключения к базе
+# Глобальный пул подключения
 pool = None
 
 async def init_db():
