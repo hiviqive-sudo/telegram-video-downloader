@@ -3,7 +3,7 @@ import logging
 import tempfile
 import os
 import time
-import asyncpg
+import sqlite3
 import yt_dlp
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import CommandStart, Command
@@ -22,17 +22,17 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 API_TOKEN = os.getenv("API_TOKEN")
-DATABASE_URL = os.getenv("DATABASE_URL")  # ← из Railway PostgreSQL
 MAX_FILE_SIZE_MB = int(os.getenv("MAX_FILE_SIZE_MB", "120"))
 REQUEST_LIMIT_PER_MINUTE = int(os.getenv("REQUEST_LIMIT_PER_MINUTE", "5"))
 
-BOT_LINK = "https://t.me/myyvideodownloader_bot"
+BOT_LINK = "https://t.me/myyvideodownloader_bot"  # ← username твоего бота
 
-# Реклама (замени на свой)
+# Реклама для бесплатных пользователей (замени на свой канал)
 AD_TEXT = (
     "Спасибо за использование! ❤️\n"
-    "Подпишись на мой канал:\n"
-    "👉 @твой_канал"
+    "Подпишись на мой основной канал для крутого контента:\n"
+    "👉 @твой_канал\n"
+    "Ещё больше полезного — заходи!"
 )
 
 bot = Bot(token=API_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
@@ -40,74 +40,79 @@ dp = Dispatcher()
 
 user_requests = {}
 
-# Глобальный пул подключения
-pool = None
+# База данных (SQLite)
+conn = sqlite3.connect('users.db')
+cursor = conn.cursor()
+cursor.execute('''
+CREATE TABLE IF NOT EXISTS users (
+    user_id INTEGER PRIMARY KEY,
+    premium_until INTEGER DEFAULT 0,
+    ref_count INTEGER DEFAULT 0,
+    ref_id INTEGER,
+    total_downloads INTEGER DEFAULT 0,
+    last_active TIMESTAMP
+)
+''')
+conn.commit()
 
-async def init_db():
-    global pool
-    pool = await asyncpg.create_pool(dsn=DATABASE_URL)
-    async with pool.acquire() as conn:
-        await conn.execute('''
-        CREATE TABLE IF NOT EXISTS users (
-            user_id BIGINT PRIMARY KEY,
-            premium_until BIGINT DEFAULT 0,
-            ref_count INTEGER DEFAULT 0,
-            ref_id BIGINT,
-            total_downloads INTEGER DEFAULT 0,
-            last_active BIGINT
-        )
-        ''')
+def is_premium(user_id):
+    cursor.execute('SELECT premium_until FROM users WHERE user_id = ?', (user_id,))
+    row = cursor.fetchone()
+    if row:
+        return row[0] > time.time()
+    return False
 
-# Функции для работы с базой
-async def is_premium(user_id):
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow('SELECT premium_until FROM users WHERE user_id = $1', user_id)
-        if row:
-            return row['premium_until'] > time.time()
-        return False
+def add_premium_days(user_id, days):
+    current_until = 0
+    cursor.execute('SELECT premium_until FROM users WHERE user_id = ?', (user_id,))
+    row = cursor.fetchone()
+    if row:
+        current_until = row[0]
+    new_until = max(current_until, int(time.time())) + days * 86400
+    cursor.execute('UPDATE users SET premium_until = ? WHERE user_id = ?', (new_until, user_id))
+    conn.commit()
 
-async def add_premium_days(user_id, days):
-    async with pool.acquire() as conn:
-        current = await conn.fetchval('SELECT premium_until FROM users WHERE user_id = $1', user_id)
-        current = current or 0
-        new_until = max(current, int(time.time())) + days * 86400
-        await conn.execute('INSERT INTO users (user_id, premium_until) VALUES ($1, $2) ON CONFLICT (user_id) DO UPDATE SET premium_until = $2', user_id, new_until)
+def increment_ref_count(ref_id):
+    cursor.execute('UPDATE users SET ref_count = ref_count + 1 WHERE user_id = ?', (ref_id,))
+    conn.commit()
 
-async def increment_ref_count(ref_id):
-    async with pool.acquire() as conn:
-        await conn.execute('UPDATE users SET ref_count = ref_count + 1 WHERE user_id = $1', ref_id)
+def has_been_referred(user_id):
+    cursor.execute('SELECT ref_id FROM users WHERE user_id = ?', (user_id,))
+    row = cursor.fetchone()
+    return row and row[0] is not None
 
-async def increment_download_count(user_id):
-    now = int(time.time())
-    async with pool.acquire() as conn:
-        await conn.execute('UPDATE users SET total_downloads = total_downloads + 1, last_active = $1 WHERE user_id = $2', now, user_id)
-
-async def get_user_stats(user_id):
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow('SELECT premium_until, ref_count, total_downloads, last_active FROM users WHERE user_id = $1', user_id)
-        if row:
-            premium_until, ref_count, total_downloads, last_active = row
-            premium_days = max(0, int((premium_until - time.time()) / 86400)) if premium_until else 0
-            last_active_str = time.strftime('%d.%m.%Y %H:%M', time.localtime(last_active)) if last_active else "Никогда"
-            return premium_days, ref_count, total_downloads, last_active_str
-        return 0, 0, 0, "Никогда"
+def set_referred_by(user_id, ref_id):
+    cursor.execute('UPDATE users SET ref_id = ? WHERE user_id = ?', (ref_id, user_id))
+    conn.commit()
 
 @dp.message(CommandStart(deep_link=True))
 async def cmd_start_ref(message: types.Message):
     args = message.text.split(' ', 1)[1] if len(message.text.split(' ', 1)) > 1 else None
     if args and args.startswith("ref"):
         ref_id = int(args.replace("ref", ""))
-        if ref_id != message.from_user.id:
-            await increment_ref_count(ref_id)
-            await add_premium_days(ref_id, 10)
-            await bot.send_message(ref_id, "🎉 Твой друг перешёл по реферальной ссылке! Тебе +10 дней премиум!")
+        user_id = message.from_user.id
+        
+        # Проверяем, был ли пользователь уже приглашён кем-то
+        if not has_been_referred(user_id):
+            if ref_id != user_id:
+                # Запоминаем, кто пригласил
+                set_referred_by(user_id, ref_id)
+                # Даём бонус пригласившему
+                increment_ref_count(ref_id)
+                add_premium_days(ref_id, 10)
+                # Уведомляем только пригласившего
+                await bot.send_message(ref_id, "🎉 Твой друг перешёл по реферальной ссылке! Тебе +10 дней премиум!")
+                await message.answer("Добро пожаловать! 🎉")
+        else:
+            await message.answer("Ты уже был приглашён ранее 😊")
+    
     await cmd_start(message)
 
 @dp.message(CommandStart())
 async def cmd_start(message: types.Message):
     user_id = message.from_user.id
-    async with pool.acquire() as conn:
-        await conn.execute('INSERT INTO users (user_id) VALUES ($1) ON CONFLICT DO NOTHING', user_id)
+    cursor.execute('INSERT OR IGNORE INTO users (user_id) VALUES (?)', (user_id,))
+    conn.commit()
 
     ref_link = f"{BOT_LINK}?start=ref{user_id}"
 
@@ -132,7 +137,7 @@ async def cmd_start(message: types.Message):
 @dp.callback_query(lambda c: c.data == "cabinet")
 async def show_cabinet(callback: types.CallbackQuery):
     user_id = callback.from_user.id
-    premium_days, ref_count, total_downloads, last_active = await get_user_stats(user_id)
+    premium_days, ref_count, total_downloads, last_active = get_user_stats(user_id)
 
     premium_status = f"Премиум активен: <b>{premium_days} дней</b> 💎" if premium_days > 0 else "Премиум не активен 😔"
 
@@ -344,10 +349,10 @@ async def process_callback(callback: types.CallbackQuery):
 
             # Счётчик скачиваний
             user_id = callback.from_user.id
-            await increment_download_count(user_id)
+            increment_download_count(user_id)
 
             # Реклама после скачивания (только для бесплатных)
-            if not await is_premium(user_id):
+            if not is_premium(user_id):
                 await callback.message.answer(AD_TEXT)
 
     except Exception as e:
@@ -358,7 +363,6 @@ async def process_callback(callback: types.CallbackQuery):
 
 async def main():
     logger.info("Бот запущен")
-    await init_db()  # ← подключаемся к базе
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
