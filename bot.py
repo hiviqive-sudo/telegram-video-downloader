@@ -3,13 +3,12 @@ import logging
 import tempfile
 import os
 import time
-import asyncpg
 import yt_dlp
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import CommandStart, Command
 from aiogram.types import FSInputFile, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.client.default import DefaultBotProperties
-from aiogram.enums import ParseMode
+from aiogram.enums import ParseMode, ContentType
 
 logging.basicConfig(
     level=logging.INFO,
@@ -22,88 +21,211 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 API_TOKEN = os.getenv("API_TOKEN")
-DATABASE_URL = os.getenv("DATABASE_URL")  # ← из Railway PostgreSQL
 MAX_FILE_SIZE_MB = int(os.getenv("MAX_FILE_SIZE_MB", "120"))
 REQUEST_LIMIT_PER_MINUTE = int(os.getenv("REQUEST_LIMIT_PER_MINUTE", "5"))
 
 BOT_LINK = "https://t.me/myyvideodownloader_bot"
-
-# Реклама (замени на свой)
-AD_TEXT = (
-    "Спасибо за использование! ❤️\n"
-    "Подпишись на мой канал:\n"
-    "👉 @твой_канал"
-)
 
 bot = Bot(token=API_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
 
 user_requests = {}
 
-# Глобальный пул подключения
-pool = None
-
 @dp.message(CommandStart())
 async def cmd_start(message: types.Message):
-    global pool
-    if pool is None:
-        pool = await asyncpg.create_pool(dsn=DATABASE_URL)
-        async with pool.acquire() as conn:
-            await conn.execute('''
-            CREATE TABLE IF NOT EXISTS users (
-                user_id BIGINT PRIMARY KEY,
-                premium_until BIGINT DEFAULT 0,
-                ref_count INTEGER DEFAULT 0,
-                ref_id BIGINT,
-                total_downloads INTEGER DEFAULT 0,
-                last_active BIGINT
-            )
-            ''')
-    
-    user_id = message.from_user.id
-    async with pool.acquire() as conn:
-        await conn.execute('INSERT INTO users (user_id) VALUES ($1) ON CONFLICT DO NOTHING', user_id)
-
-    ref_link = f"{BOT_LINK}?start=ref{user_id}"
-
-    welcome_text = (
-        "✨ <b>Привет, легенда скачиваний! 👋</b> ✨\n\n"
-        "Я твой личный помощник по видео и музыке 🔥\n"
-        "Скачиваю всё самое крутое из:\n"
-        "  • TikTok 🎬\n"
-        "  • Instagram Reels 📱\n"
-        "  • VK клипы 🎥\n\n"
-        "<b>Просто пришли ссылку</b> — и я всё сделаю за секунды! 🚀\n\n"
-        "Выбирай качество и наслаждайся! 🌟"
+    await message.answer(
+        "<b>Привет! 👋</b>\n\n"
+        "Скачиваю видео и аудио из TikTok и Instagram Reels.\n\n"
+        "<b>Пришли ссылку</b> — выбери, что скачать!"
     )
 
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Личный кабинет 📊", callback_data="cabinet")],
-        [InlineKeyboardButton(text="Пригласить друга и получить бонус 🎁", callback_data="show_ref")]
-    ])
+@dp.message(Command("help"))
+async def cmd_help(message: types.Message):
+    await message.answer(
+        "<b>Как пользоваться</b>\n\n"
+        "1. Пришли ссылку на видео/клип из TikTok или Instagram Reels\n"
+        "2. Выбери «Видео» или «Аудио»\n"
+        "3. Жди — бот пришлёт файл\n\n"
+        f"Лимит размера: {MAX_FILE_SIZE_MB} МБ\n"
+        "Если не скачивается — попробуй другую ссылку."
+    )
 
-    await message.answer(welcome_text, reply_markup=keyboard, disable_web_page_preview=True)
+@dp.message(content_types=ContentType.TEXT)
+async def handle_link(message: types.Message):
+    url = message.text.strip()
+    logger.info(f"Получена ссылка от {message.from_user.id}: {url}")
 
-# Остальной код (handle_link, process_callback, show_ref, show_cabinet и т.д.) — оставь как был
-# Просто замени sqlite3 на asyncpg запросы (как в is_premium и add_premium_days ниже)
+    if not url.startswith(("http://", "https://")):
+        await message.answer("Пришли ссылку на видео/клип.")
+        return
 
-async def is_premium(user_id):
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow('SELECT premium_until FROM users WHERE user_id = $1', user_id)
-        if row:
-            return row['premium_until'] > time.time()
-        return False
+    if "t.me/" in url.lower():
+        await message.answer("Это ссылка на Telegram. Пришли ссылку на видео/клип!")
+        return
 
-async def add_premium_days(user_id, days):
-    async with pool.acquire() as conn:
-        current = await conn.fetchval('SELECT premium_until FROM users WHERE user_id = $1', user_id)
-        current = current or 0
-        new_until = max(current, int(time.time())) + days * 86400
-        await conn.execute('INSERT INTO users (user_id, premium_until) VALUES ($1, $2) ON CONFLICT (user_id) DO UPDATE SET premium_until = $2', user_id, new_until)
+    user_id = message.from_user.id
+    now = time.time()
+    if user_id not in user_requests:
+        user_requests[user_id] = []
+    user_requests[user_id] = [t for t in user_requests[user_id] if now - t < 60]
+    if len(user_requests[user_id]) >= REQUEST_LIMIT_PER_MINUTE:
+        await message.answer("Подожди минуту ⏳")
+        return
+    user_requests[user_id].append(now)
 
-async def increment_ref_count(ref_id):
-    async with pool.acquire() as conn:
-        await conn.execute('UPDATE users SET ref_count = ref_count + 1 WHERE user_id = $1', ref_id)
+    await message.answer("Получаю информацию... ⏳")
+
+    try:
+        ydl_opts = {
+            "quiet": True,
+            "no_warnings": True,
+            "noplaylist": True,
+            "retries": 10,
+            "fragment_retries": 5,
+            "socket_timeout": 60,
+            "nocheckcertificate": True,
+            "cookiefile": "cookies.txt",
+        }
+
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+
+            extractor = info.get("extractor_key", "").lower()
+            if "tiktok" not in extractor and "instagram" not in extractor:
+                await message.answer("Поддерживаю только TikTok и Instagram Reels. Попробуй другую ссылку.")
+                return
+
+            title = info.get("title", "Без названия")
+            uploader = info.get("uploader", "Автор неизвестен")
+            duration = info.get("duration", 0)
+            duration_str = f"{int(duration) // 60:02d}:{int(duration) % 60:02d}" if duration and duration > 0 else "—"
+            thumbnail = info.get("thumbnail")
+
+            bot.full_url = url
+
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [
+                    InlineKeyboardButton(text="Видео 🎥", callback_data="dl_video"),
+                    InlineKeyboardButton(text="Аудио 🎵", callback_data="dl_audio")
+                ],
+                [
+                    InlineKeyboardButton(text="Назад ⬅️", callback_data="back")
+                ]
+            ])
+
+            caption = (
+                f"<b>{title}</b>\n"
+                f"Автор: {uploader}\n"
+                f"Длительность: {duration_str}\n"
+                f"Источник: {info.get('extractor_key', 'сайт')}\n\n"
+                f"Что скачать:\n\n"
+                f"🤖 <a href=\"{BOT_LINK}\">Ещё</a>"
+            )
+
+            if thumbnail:
+                await message.answer_photo(
+                    photo=thumbnail,
+                    caption=caption,
+                    reply_markup=keyboard
+                )
+            else:
+                await message.answer(caption, reply_markup=keyboard)
+
+    except Exception as e:
+        logger.error(f"Ошибка обработки {url}: {str(e)}", exc_info=True)
+        await message.answer("Не получилось обработать эту ссылку 😔\nПопробуй другую или /help")
+
+@dp.callback_query(lambda c: c.data in ["dl_video", "dl_audio", "back"])
+async def process_callback(callback: types.CallbackQuery):
+    if callback.data == "back":
+        await callback.message.delete()
+        await callback.message.answer("<b>Отменил выбор.</b>\n\nПришли новую ссылку или /start")
+        await callback.answer()
+        return
+
+    choice = callback.data.split("_")[1]
+    url = bot.full_url
+
+    await callback.message.edit_caption(caption=f"Скачиваю {choice}... ⏳", reply_markup=None)
+
+    try:
+        if choice == "video":
+            format_str = "best[ext=mp4]/best"
+        else:
+            format_str = "bestaudio[ext=m4a]/bestaudio/best"
+
+        ydl_opts = {
+            "format": format_str,
+            "outtmpl": "%(id)s.%(ext)s",
+            "quiet": True,
+            "no_warnings": True,
+            "noplaylist": True,
+            "retries": 10,
+            "socket_timeout": 60,
+            "nocheckcertificate": True,
+            "cookiefile": "cookies.txt",
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ydl_opts["outtmpl"] = os.path.join(tmpdir, "%(id)s.%(ext)s")
+
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=True)
+                filename = ydl.prepare_filename(info)
+
+            file_size_mb = os.path.getsize(filename) / (1024 * 1024)
+
+            if file_size_mb > MAX_FILE_SIZE_MB:
+                await callback.message.edit_caption(caption=f"Файл слишком большой ({file_size_mb:.1f} МБ)")
+                return
+
+            title = info.get("title", "Файл")
+            uploader = info.get("uploader", "Автор неизвестен")
+            duration = info.get("duration", 0)
+            duration_str = f"{int(duration) // 60:02d}:{int(duration) % 60:02d}" if duration and duration > 0 else "—"
+
+            caption = (
+                f"<b>{title}</b>\n"
+                f"Автор: {uploader}\n"
+                f"Длительность: {duration_str}\n"
+                f"Размер: {file_size_mb:.1f} МБ\n"
+                f"Тип: {'Аудио' if choice == 'audio' else 'Видео'}\n\n"
+                f"🤖 <a href=\"{BOT_LINK}\">Ещё</a>"
+            )
+
+            if choice == "audio":
+                await callback.message.answer_audio(
+                    audio=FSInputFile(filename),
+                    caption=caption,
+                    title=title,
+                    performer=uploader
+                )
+            else:
+                if file_size_mb <= 50:
+                    await callback.message.answer_video(
+                        video=FSInputFile(filename),
+                        caption=caption,
+                        supports_streaming=True
+                    )
+                else:
+                    await callback.message.answer_document(
+                        document=FSInputFile(filename),
+                        caption=caption
+                    )
+
+            await callback.message.delete()
+
+            # Автоматическое удаление файла после отправки
+            os.remove(filename)
+
+            # Реклама после скачивания
+            await callback.message.answer(AD_TEXT)
+
+    except Exception as e:
+        logger.error(f"Ошибка скачивания {url} ({choice}): {str(e)}", exc_info=True)
+        await callback.message.edit_caption(caption="Не получилось скачать 😔\nПопробуй другую ссылку.")
+
+    await callback.answer()
 
 async def main():
     logger.info("Бот запущен")
