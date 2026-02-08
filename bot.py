@@ -11,7 +11,6 @@ from aiogram.types import FSInputFile, InlineKeyboardMarkup, InlineKeyboardButto
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
-# Логирование
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -29,7 +28,7 @@ LOG_CHANNEL_ID = os.getenv("LOG_CHANNEL_ID", None)  # ← ID твоего кан
 
 BOT_LINK = "https://t.me/myyvideodownloader_bot"  # ← username твоего бота
 
-# Реклама после скачивания (замени на свою)
+# Реклама после скачивания (замени на свой)
 AD_TEXT = (
     "Спасибо за использование! ❤️\n"
     "Подпишись на мой основной канал для крутого контента:\n"
@@ -37,12 +36,12 @@ AD_TEXT = (
     "Ещё больше полезного — заходи!"
 )
 
-# Качества видео (гибкие, без ошибок)
+# Качества (строгие, с правильным приоритетом размера/качества)
 QUALITIES = {
-    "360": "bestvideo[height<=360][ext=mp4]/best[ext=mp4]",
-    "480": "bestvideo[height<=480][ext=mp4]/best[ext=mp4]",
-    "720": "bestvideo[height<=720][ext=mp4]/best[ext=mp4]",
-    "1080": "bestvideo[height<=1080][ext=mp4]/best[ext=mp4]",
+    "360": "bv*[height<=360]+ba/bv*[height<=360]",
+    "480": "bv*[height<=480]+ba/bv*[height<=480]",
+    "720": "bv*[height<=720]+ba/bv*[height<=720]",
+    "1080": "bv*[height<=1080]+ba/bv*[height<=1080]",
     "Аудио": "bestaudio[ext=m4a]/bestaudio/best",
 }
 
